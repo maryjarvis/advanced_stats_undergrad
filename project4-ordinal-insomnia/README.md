@@ -18,6 +18,13 @@ This project uses ordinal logistic regression to model levels of insomnia severi
 - `Copy_of_Dataset_Miranda_et_al.csv` – dataset 
 - `project4.pdf` – summary report
 
+## 📊 Data Source
+This dataset is based on anonymised survey data from published studies.
+
+Miranda, A. R., MD, Scotta, A. V., MD, Cortez, M. V., PhD, & Soria, E. A., PhD (2021). Triggering of postpartum depression and insomnia with cognitive impairment in Argentinian women during the pandemic COVID-19 social isolation in relation to reproductive and health factors. Midwifery, 102, 103072. https://doi.org/10.1016/j.midw.2021.103072
+
+The data is used here for educational and non-commercial purposes only.
+
 ## 📌 Outcome
 The analysis confirmed that maternal age and employment status were significant predictors of insomnia severity, with higher risk linked to early pandemic stages and unemployment.
 
