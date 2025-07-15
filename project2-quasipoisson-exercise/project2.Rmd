@@ -1,0 +1,409 @@
+---
+bibliography: reference.bib
+biblio-style: apalike
+output:
+  pdf_document:
+    latex_engine: xelatex
+    citation_package: natbib
+header-includes:
+  \usepackage{booktabs}
+  \usepackage{graphicx}
+  \usepackage{float}
+  \usepackage{amsmath}
+---
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, # don't return messages
+                      warning = FALSE, # don't return warnings
+                      comment = NA, # don't comment output
+                      echo = FALSE, # display chunk (is default)
+                      eval = TRUE, # evaluate chunk (is default)
+                      out.width = '80%', # figure width, 
+                      fig.align = 'center',
+                      fig.width = 15,
+                      fig.height = 8)
+```
+```{r Packages}
+library(MASS)
+library(broom)
+library(broom.mixed)
+library(car)
+library(brant)
+library(stats)
+library(tinytex)
+library(MuMIn)
+library(lmerTest)
+library(caret)
+library(VGAM)
+library(nnet)
+library(splines)
+library(cowplot)
+library(stats)
+library(caret)
+library(ggridges)
+library(ggalluvial)
+library(kernlab)
+library(dplyr)
+library(influence.ME)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(gtsummary)
+library(janitor)
+library(kableExtra)
+library(knitr)
+library(lme4)
+library(lmtest)
+library(Matrix)
+library(ordinal)
+library(modelr)
+library(patchwork)
+library(pROC)
+library(sjPlot)
+library(table1)
+library(tidyverse)
+```
+
+# Research Question 2: Count Model Regression 
+```{r loaddata2}
+# Upload and clean data 
+covid <- read.csv("~/Desktop/loneliness_original.csv") %>%
+  clean_names()
+
+# Select variables and factor gender
+covid_df <- covid <- dplyr::select(covid, age, gender, healthy_diet, loneliness, physical_exercise) %>%
+  filter(gender != 3) %>%   #Filter gender
+  filter(complete.cases(.)) %>%  #Remove missing values
+  mutate(gender = factor(gender, levels = c(1, 2), labels = c("Male", "Female"))) 
+
+# Subset the data for Females and Males
+female_data <- covid_df %>% filter(gender == "Female")
+male_data <- covid_df %>% filter(gender == "Male")
+
+```
+## Objective of Analysis
+This study investigates how psychological and behavioural factors influenced daily physical exercise frequency during the COVID-19 pandemic. The pandemic context, marked by isolation and restrictions, likely amplified the role of these factors, shaping exercise behaviours and coping mechanisms \citep{brooks2020psychological}. Findings offer insights into how dietary habits and loneliness impact exercise frequency, informing targeted public health strategies to promote healthier behaviours and mitigate the negative effects of prolonged restrictions \citep{robinson2021obesity}.
+
+The data analysed are published in \cite{pinedo2021factors} and can be found in the CSV file *‘loneliness_original.csv’* inside the data sub-directory. The dataset focuses on individuals' behavioural and psychological attributes during the COVID-19 pandemic in Spain and was collected between March and May 2020. The data is comprised of `r nrow(covid_df)` participants, with the count outcome variable, **Physical Exercise**, which represents the frequency of an individual partaking in daily exercise (*mean* = `r round(mean(covid_df$physical_exercise, na.rm = TRUE), 2)` times per day; *SD* = `r round(sd(covid_df$physical_exercise, na.rm = TRUE), 2)`; range= `r min(covid_df$physical_exercise, na.rm = TRUE)` to `r max(covid_df$physical_exercise, na.rm = TRUE)`). Key psychological factors include **Loneliness**, a continuous variable (*median* = `r round(median(covid_df$loneliness, na.rm = TRUE), 2)`;*mean* = `r round(mean(covid_df$loneliness, na.rm = TRUE), 2)`; *SD* = `r round(sd(covid_df$loneliness, na.rm = TRUE), 2)`; range = `r min(covid_df$loneliness, na.rm = TRUE)` to `r max(covid_df$loneliness, na.rm = TRUE)`) reflects the degree of perceived social isolation among participants, with higher scores indicating greater levels of loneliness. Behavioural variables include **Healthy Diet**, a categorical variable of how healthy an individual's diet is out of `r min(covid_df$healthy_diet, na.rm = TRUE)` to `r max(covid_df$healthy_diet, na.rm = TRUE)`, with `r max(covid_df$healthy_diet, na.rm = TRUE)` being the healthiest (least sugar) and `r min(covid_df$healthy_diet, na.rm = TRUE)` being the least healthy (most sugar) (*mean* = `r round(mean(covid_df$healthy_diet, na.rm = TRUE), 2)`; *SD* = `r round(sd(covid_df$healthy_diet, na.rm = TRUE), 2)`; range = `r min(covid_df$healthy_diet, na.rm = TRUE)` to `r max(covid_df$healthy_diet, na.rm = TRUE)`). Demographics variables comprise: **Age**, a continuous variable, ranging from `r min(covid_df$age, na.rm = TRUE)` and `r max(covid_df$age, na.rm = TRUE)` years (*median* = `r round(median(covid_df$age, na.rm = TRUE), 2)`; *mean* = `r round(mean(covid_df$age, na.rm = TRUE), 2)`; *SD* = `r round(sd(covid_df$age, na.rm = TRUE), 2)`). As well as, **Gender**, a categorical variable with the majority of participants identifying as female (*n* = `r sum(covid_df$gender == "Female", na.rm = TRUE)`; `r round(mean(covid_df$gender == "Female", na.rm = TRUE) * 100, 2)`%) compared to male (*n* = `r sum(covid_df$gender == "Male", na.rm = TRUE)`; `r round(mean(covid_df$gender == "Male", na.rm = TRUE) * 100, 2)`%). 
+
+```{r descriptivestwo, fig.cap="The Distribution of Physical Exercise Frequency and Healthy Diet Scores among Participants.", out.height='25%'}
+# Creating descriptive figures
+# 1. Distribution of Physical Exercise
+exercise_dist_plot <- ggplot(covid_df, aes(x = physical_exercise, fill = as.factor(physical_exercise))) +
+  geom_bar(color = "black", alpha = 0.8) + 
+  labs(title = "a",
+       x = "Physical Exercise Frequency",
+       y = "Frequency of Participants") +
+  scale_fill_brewer(palette = "heat") +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 18, face = "bold"),
+    legend.position = "none",  
+    axis.text = element_text(color = "black", face = "bold"),
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_blank()
+  )
+
+# 2. Healthy Diet vs Physical Exercise
+# count diet
+diet_counts <- covid_df %>%
+  group_by(healthy_diet) %>%
+  tally()
+
+# Bar plot 
+healthy_diet_exercise_plot <- ggplot(diet_counts, aes(x = as.factor(healthy_diet), y = n, group = 1)) +
+  geom_bar(stat = "identity", aes(fill = as.factor(healthy_diet)), color = "black", alpha = 0.8) +
+  labs(title= "b",
+       x = "Healthy Diet Score",
+       y = "Frequency of Participants") +
+  scale_fill_brewer(palette = "Oranges") +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 18, face = "bold"),
+    legend.position = "none",
+    axis.text = element_text(color = "black", face = "bold"),
+    panel.grid.major = element_line(color = "grey"),
+    panel.grid.minor = element_blank()
+  )
+
+# Combine plots
+grid.arrange(
+  exercise_dist_plot, 
+  healthy_diet_exercise_plot, 
+  ncol = 2)
+
+```
+
+Figure \ref{fig:descriptivestwo}:a illustrates most participants exercise twice (`r round(100 * sum(covid_df$physical_exercise == 2) / nrow(covid_df), 2)`%; *n* = `r sum(covid_df$physical_exercise == 2)`) per day, followed by three times (`r round(100 * sum(covid_df$physical_exercise == 3) / nrow(covid_df), 2)`%; *n* = `r sum(covid_df$physical_exercise == 3)`) per day, once (`r round(100 * sum(covid_df$physical_exercise == 1) / nrow(covid_df), 2)`%; *n* = `r sum(covid_df$physical_exercise == 1)`) per day, and four times (`r round(100 * sum(covid_df$physical_exercise == 4) / nrow(covid_df), 2)`%; *n* = `r sum(covid_df$physical_exercise == 4)`) per day. The healthy diet bar plot (b) highlights most participants rated their diet as 3 (`r round(100 * sum(covid_df$healthy_diet == 3) / nrow(covid_df), 2)`%; *n* = `r sum(covid_df$healthy_diet == 3)`), followed by a rating of 2 (`r round(100 * sum(covid_df$healthy_diet == 2) / nrow(covid_df), 2)`%; *n* = `r sum(covid_df$physical_exercise == 2)`), a rating of 4 (`r round(100 * sum(covid_df$physical_exercise == 4) / nrow(covid_df), 2)`%; *n* = `r sum(covid_df$physical_exercise == 4)`), and a rating of 1 (`r round(100 * sum(covid_df$physical_exercise == 1) / nrow(covid_df), 2)`%; *n* = `r sum(covid_df$physical_exercise == 1)`).
+
+## Statistical model 
+```{r countcheck, results='hide', message=FALSE, warning=FALSE}
+# Model Specification and Selection
+
+## Fit a Poisson regression model
+poisson_model <- glm(physical_exercise ~ healthy_diet + age + gender + loneliness, 
+                     family = "poisson", data = covid_df)
+
+#calculate dispersion statistic for the Poisson model
+dispersion <- sum(residuals(poisson_model, type = "pearson")^2) / poisson_model$df.residual
+
+#Fit a Quasi-poisson model to account for overdispersion
+quasi_poisson_model_test <- glm(physical_exercise ~ healthy_diet + age + gender + loneliness, 
+                           family = quasipoisson, data = covid_df)
+```
+To model the count outcome of physical exercise, different statistical approaches were considered. The Poisson regression model, suitable for count data with equal mean and variance, was initially tested but rejected due to evidence of underdispersion (\(\phi\) = `r round(dispersion, 3)`, where \(\phi\) < 1), which violates the Poisson assumption and risks overestimating standard errors. The Negative Binomial model, designed for overdispersed data, and the Zero-Inflated Negative Binomial model were also unsuitable, as the data exhibited underdispersion and contained no zero counts. The Quasi-Poisson model was selected as the most appropriate approach. Unlike the Negative Binomial model, the Quasi-Poisson model introduces a dispersion parameter (\(\phi\)) that adjusts the variance independently of the mean (\(\text{Var}(Y) = \phi \cdot \mu\)), providing flexibility to handle underdispersion. This model retains the log-link function, preserving coefficient interpretability on the log scale, where predictors represent multiplicative effects on the outcome. To capture nonlinear relationships, quadratic terms were incorporated, and interaction terms (e.g., healthy diet × loneliness) were tested to explore potential dependencies between predictors. For example, the interaction between diet quality and loneliness examines whether individuals with better diets are more likely to exercise, depending on their level of social connectedness. The final Quasi-Poisson regression model was specified as:
+$$
+\text{log}(\mu_i) = \beta_0 + \sum_{k=1}^K \beta_k x_{ki} 
+$$
+
+where \( \mu_i \) is the expected physical exercise frequency for individual \( i \), \( \beta_0 \) is the intercept, \( \beta_k \) are the coefficients for predictors and \( x_{ki} \) is the value of predictor \( k \) for individual \( i \). A one-unit increase in \( x_{ki} \) leads to a proportional change in \( \mu_i \) by a factor of \( \exp(\beta_k) \), holding other predictors constant. The model was implemented in R using the glm() function: 
+```{r, echo=TRUE}
+quasi_poisson_model <- glm(physical_exercise ~ healthy_diet * loneliness +  gender
+                           + age + I(age^2), family = quasipoisson, data = covid_df)
+```
+```{r bmvalidation, results='hide', message=FALSE, include=FALSE, warning=FALSE}
+# Model validation
+
+#Residual plots- plotting residuals vs fitted values to check for any violations
+residplot <- plot(residuals(quasi_poisson_model, type = "deviance"))
+
+# Plot residuals against fitted values for further inspection of model fit
+residplot2 <- plot(fitted(quasi_poisson_model), residuals(quasi_poisson_model, type = "deviance"),
+     main = "Residuals vs Fitted", 
+     xlab = "Fitted Values", 
+     ylab = "Residuals")
+
+#Cooks distance 
+cooksd <- cooks.distance(quasi_poisson_model)
+threshold <- 4 / nrow(covid_df) #Threshold for identifying influential points
+
+# Plot Cook's distance to visualise which points are influential
+plot(cooksd, pch = 20, cex = 1.5, main = "Cook's Distance for Quasi-Poisson Model", 
+     xlab = "Observation Index", ylab = "Cook's Distance")
+abline(h = threshold, col = "red", lty = 2)
+
+# Identify outliers (observations with Cook's distance greater than the threshold)
+outliers <- which(cooksd > threshold)
+covid_df <- covid_df[-outliers, ] #Remove the rows corresponding to influential points
+
+#VIF analysis
+vif_values <- vif(quasi_poisson_model)
+```
+Influential points identified using Cook's Distance (4/\( n \)) were removed to improve robustness and variance inflation factor analysis revealed no significant multicollinearity concerns among predictors. Residual diagnostics indicated a good fit, with no major patterns observed in residual plots. 
+
+### Comparison of Models
+```{r, echo =TRUE, eval=FALSE}
+poisson_model <- glm(physical_exercise ~ healthy_diet * loneliness + gender
+                           + age + I(age^2), family = poisson, data = covid_df)
+
+negative_binomial_model <- glm.nb(physical_exercise ~ healthy_diet * loneliness
+                                  + gender + age + I(age^2), data = covid_df)
+
+anova(poisson_model, negative_binomial_model, test = "Chisq")
+```
+```{r bmcomparison}
+# Model comparison
+# Model 1: Poisson regression
+poisson_model <- glm(physical_exercise ~ healthy_diet * loneliness + gender
+                           + age + I(age^2), family = poisson, data = covid_df)
+poisson_aic <- round(AIC(poisson_model), 2) # Calculate the AIC for the Poisson model
+poisson_bic <- round(BIC(poisson_model), 2) # Calculate the BIC for the Poisson model
+poisson_loglik <- logLik(poisson_model) # Extract the log-likelihood for the Poisson model to assess model fit 
+
+# Model 2: Quasi-Poisson regression
+quasi_poisson_model <- glm(physical_exercise ~ healthy_diet * loneliness +  gender + age + I(age^2), family = quasipoisson, data = covid_df)
+
+# Model 3: Negative Binomial regression
+negative_binomial_model <- glm.nb(physical_exercise ~ healthy_diet * loneliness + age + I(age^2) + gender, data = covid_df)
+negative_binomial_aic <- round(AIC(negative_binomial_model), 2) # Calculate the AIC for the negative binomial model
+negative_binomial_bic <- round(BIC(negative_binomial_model), 2) # Calculate the BIC for the negative binomial model
+negative_binomial_loglik <- logLik(negative_binomial_model) # Extract the log-likelihood for the negative Binomial model to assess model fit 
+
+# Calculate null model log-likelihood
+null_model <- glm(physical_exercise ~ 1, family = poisson, data = covid_df)
+null_loglik <- logLik(null_model)
+
+# McFadden's R^2 for model comparison
+poisson_r2 <- round(1 - as.numeric(poisson_loglik / null_loglik), 2)
+negative_binomial_r2 <-round(1 - as.numeric(negative_binomial_loglik / null_loglik), 2)
+
+# Deviance for all models 
+poisson_deviance <- round(summary(poisson_model)$deviance, 2)
+quasi_poisson_deviance <- round(summary(quasi_poisson_model)$deviance, 2)
+negative_binomial_deviance <- round(summary(negative_binomial_model)$deviance, 2)
+
+# Output Model Comparison Table
+model_comparison <- data.frame(
+  Model = c("Poisson", "Negative Binomial"),
+  AIC = c(poisson_aic, negative_binomial_aic),
+  BIC = c(poisson_bic,  negative_binomial_bic),
+  Deviance = c(poisson_deviance, negative_binomial_deviance),
+  McFadden_R2 = c(poisson_r2, negative_binomial_r2)
+)
+
+# Display the comparison table
+knitr::kable(
+  model_comparison, 
+  caption = "Model Comparison Results. \\label{tab:bmcomp}", 
+  format = "markdown", 
+  digits = 2
+)
+
+
+
+# Drop 1 test to evaluate the impact of each predictor
+drop1_poisson <- drop1(poisson_model, test = "Chisq")
+
+# Display Drop1 Results for both models
+drop1_poisson <- knitr::kable(
+  drop1_poisson, 
+  caption = "Drop1 Test Results for Poisson Model", 
+  format = "markdown", 
+  digits = 3
+)
+
+# Perform ANOVA for model comparison
+anova_results <- anova(poisson_model, negative_binomial_model, test = "Chisq")
+
+```
+
+Model comparison (Table \ref{tab:bmcomp}) reveals that the Poisson model has the lowest AIC (`r round(poisson_aic, 2)`), but underdispersion in the data makes Quasi-Poisson model a more reliable choice, as it adjusts for underdispersion while maintaining the same deviance (`r round(quasi_poisson_deviance, 2)`) as the Poisson model. The Negative Binomial model has a slightly lower deviance (`r round(negative_binomial_deviance, 2)`), indicating a marginally better fit, but it is less suitable due to its higher AIC (`r round(negative_binomial_aic, 2)`) and overdispersion handling, which is unnecessary for this dataset. Both Poisson and Negative Binomial models have McFadden’s \( R^2 \) of `r round(poisson_r2, 2)`, indicating modest model fit improvement. Despite the low \( R^2 \), the models still provide valuable insights into the relationships between predictors and physical exercise. A Drop1 test indicated that removing the quadratic term for age significantly increases deviance and AIC, underscoring its contribution to model fit. The interaction between healthy diet and loneliness also plays a role, suggesting that diet's effect on physical exercise may depend on loneliness. The ANOVA comparison between the Poisson and Negative Binomial models indicates that, despite the Poisson model’s slightly better AIC, the Negative Binomial model offers a better fit with lower deviance. Therefore, Quasi-Poisson regression, which incorporates a quadratic term, is chosen due to the model's ability to account for underdispersion while capturing nonlinear relationships \citep{wood2017generalized}.
+
+## Model Evaluation and Interpretation
+```{r countsummary}
+# Creating dataframe for coefficients table
+model_summary <- summary(quasi_poisson_model)
+coef_table <- as.data.frame(model_summary$coefficients)
+
+# Extract coefficients
+coef_table <- as.data.frame(model_summary$coefficients)
+
+# Extract standard errors from model summary
+std_errors <- summary(quasi_poisson_model)$coefficients[, "Std. Error"]
+
+# Calculate p-values
+coef_table$p_value <- round(2 * pt(-abs(coef_table$`t value`), df = nrow(covid_df) - 1), 3)
+
+# Add exponentiated coefficients and confidence intervals
+coef_table$exp_beta <- exp(coef_table$Estimate)
+conf_int <- confint(quasi_poisson_model)
+coef_table$CI <- paste0("[", round(exp(conf_int[, 1]), 2), ", ", round(exp(conf_int[, 2]), 2), "]")
+
+# Calculate p-values and significance levels
+coef_table <- coef_table %>%
+  mutate(
+    formatted_p_value = case_when(
+      p_value < 0.001 ~ "< .001***",
+      p_value < 0.01 ~ paste0(p_value, "**"),
+      p_value < 0.05 ~ paste0(p_value, "*"),
+      TRUE ~ as.character(p_value)
+    )
+  )
+
+# Reorder and rename columns
+coef_table <- coef_table %>%
+  select(
+    Estimate, 
+    `Std. Error`, 
+    `t value`, 
+    formatted_p_value, 
+    exp_beta, 
+    CI
+  ) %>%
+  rename(
+    `Estimate (Beta)` = Estimate,
+    `Std. Error` = `Std. Error`,
+    `t-value` = `t value`,
+    `p-value` = formatted_p_value, 
+    `exp(Beta)` = exp_beta,
+    `95% CI (exp(Beta))` = CI
+  )
+
+# Rename row names
+rownames(coef_table) <- c(
+  "(Intercept)", 
+  "Healthy Diet",
+  "Loneliness",
+  "Gender: Female",
+  "Age",
+  "Age (Quadratic)",
+  "Healthy Diet X Loneliness"
+)
+
+# Coefficients table 
+knitr::kable(
+  coef_table, 
+  caption = "Coefficients Table for Quassi-Poisson Model. \\label{tab:coefquasi}",
+  align = c("l", "c", "c", "c", "c", "c"),
+  digits = 2,
+  format = "latex",
+  booktabs = TRUE
+) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    font_size = 8,
+    latex_options = c("hold_position")
+  ) %>%
+  column_spec(5, width = "2cm", latex_column_spec = "p{2cm}")
+
+
+```
+*Note.* Significance levels: \textasteriskcentered\textasteriskcentered\textasteriskcentered\ \(p < .001\), 
+\textasteriskcentered\textasteriskcentered\ \(p < .01\), 
+\textasteriskcentered\ \(p < .05\).
+
+The Quasi-Poisson regression model highlights the key predictors influencing physical exercise frequency, with strong evidence for some predictors and inconclusive findings for others (Table \ref{tab:coefquasi}). The model's intercept (\( \beta_0 = `r round(coef(quasi_poisson_model)["(Intercept)"], 2)` \), \( p `r format.pval(model_summary$coefficients["(Intercept)", "Pr(>|t|)"], digits = 3, eps = 0.001)` \)) represents the log-expected frequency of physical exercise when all predictors are at their mean or reference values. After exponentiation, \( \exp(\beta_0) = `r round(exp(coef(quasi_poisson_model)["(Intercept)"]), 2)` \), indicates that individuals engage in physical exercise approximately `r round(exp(coef(quasi_poisson_model)["(Intercept)"]), 2)` times per day on average.
+
+**Healthy Diet** emerges as the most significant predictor, showing a positive association with physical activity (\( \beta = `r round(coef(quasi_poisson_model)["healthy_diet"], 2)` \), \( p `r format.pval(model_summary$coefficients["healthy_diet", "Pr(>|t|)"], digits = 3, eps = 0.001)` \)). A one-unit improvement in diet quality corresponds to a `r round((exp(coef(quasi_poisson_model)["healthy_diet"]) - 1) * 100, 2)`% increase in exercise frequency (\( \exp(\beta) = `r round(exp(coef(quasi_poisson_model)["healthy_diet"]), 2)` \), 95% CI: [`r round(exp(confint(quasi_poisson_model)["healthy_diet", 1]), 2)`, `r round(exp(confint(quasi_poisson_model)["healthy_diet", 2]), 2)`]). These findings highlight the critical role of dietary quality in promoting exercise and its potential as a public health intervention target. **Age** exhibits a significant nonlinear relationship with physical exercise. The linear term (\( \beta = `r round(coef(quasi_poisson_model)["age"], 2)` \), \( p `r format.pval(model_summary$coefficients["age", "Pr(>|t|)"], digits = 3, eps = 0.001)` \)) indicates a decline in exercise frequency with increasing age. However, the quadratic term (\( \beta = `r round(coef(quasi_poisson_model)["I(age^2)"], 2)` \), \( p \) `r format.pval(model_summary$coefficients["I(age^2)", "Pr(>|t|)"], digits = 3, eps = 0.001)`) reveals that this decline stabilizes or reverses in older populations. These results highlight the need for age-specific interventions, particularly targeting younger populations to address declining exercise habits. **Loneliness** (\( \beta = `r round(coef(quasi_poisson_model)["loneliness"], 2)` \), \( p = `r format.pval(model_summary$coefficients["loneliness", "Pr(>|t|)"], digits = 2, eps = 0.001)` \)) was not a significant predictor, as its confidence intervals (95% CI: [`r round(exp(confint(quasi_poisson_model)["loneliness", 1]), 2)`, `r round(exp(confint(quasi_poisson_model)["loneliness", 2]), 2)`]) overlap 1. This suggests a negligible effect on physical activity, possibly due to variability in how loneliness influences behaviour—some individuals may use exercise to cope, while others may become more sedentary. The small effect size may also contribute to non-significance. Similarly, **Gender (Female)** (\( \beta = `r round(coef(quasi_poisson_model)["genderFemale"], 2)` \), \( p = `r format.pval(model_summary$coefficients["genderFemale", "Pr(>|t|)"], digits = 2, eps = 0.001)` \)) showed no substantial differences between males and females (95% CI: [`r round(exp(confint(quasi_poisson_model)["genderFemale", 1]), 2)`, `r round(exp(confint(quasi_poisson_model)["genderFemale", 2]), 2)`]). This result likely reflects balanced exercise behaviours during the pandemic. The interaction between **Healthy Diet and Loneliness** (\( \beta = `r round(coef(quasi_poisson_model)["healthy_diet:loneliness"], 2)` \), \( p = `r format.pval(model_summary$coefficients["healthy_diet:loneliness", "Pr(>|t|)"], digits = 2, eps = 0.001)` \)) was also non-significant (95% CI: [`r round(exp(confint(quasi_poisson_model)["healthy_diet:loneliness", 1]), 2)`, `r round(exp(confint(quasi_poisson_model)["healthy_diet:loneliness", 2]), 2)`]), indicating that the relationship between diet quality and physical activity does not depend on loneliness levels, suggesting the effect of diet quality on physical activity is additive. 
+
+The standard errors for significant predictors, such as healthy diet (*SE* = `r round(std_errors["healthy_diet"], 2)`) were small, indicating precise estimates. Likewise, the small standard error for loneliness (*SE* = `r round(std_errors["loneliness"], 2)`) reflects high precision, with its non-significance likely attributable to a small effect size or limited variability rather than estimation error. The model's explanatory power is supported by a reduction in deviance from `r round(model_summary$null.deviance, 1)` (null deviance) on `r model_summary$df.null` degrees of freedom to `r round(model_summary$deviance, 1)` (residual deviance) on `r model_summary$df.residual` degrees of freedom. This reduction indicates that the included predictors substantially improve the model's fit.
+
+### Model predictions
+```{r, echo=TRUE, eval=FALSE}
+predict(quasi_poisson_model, newdata = prediction_data, type = "link")
+```
+```{r, countpredplot, out.height='25%', fig.align='center', fig.cap='Predicted Exercise Frequency by Age and Healthy Diet.'}
+# Refit the model excluding loneliness and gender
+quasi_poisson_model <- glm(
+  physical_exercise ~ healthy_diet + age + I(age^2),
+  data = covid_df,
+  family = quasipoisson
+)
+
+# Generate predictions for significant predictors
+prediction_data <- expand.grid(
+  healthy_diet = c(1, 2, 3, 4),  
+  age = seq(min(covid_df$age, na.rm = TRUE), max(covid_df$age, na.rm = TRUE), length.out = 50)
+)
+
+# Predict using the refitted model
+predictions <- predict(
+  quasi_poisson_model,
+  newdata = prediction_data,
+  type = "link",
+  se.fit = TRUE
+)
+
+# Add predictions and confidence intervals to the data
+prediction_data$predicted_exercise <- exp(predictions$fit)
+prediction_data$lower_ci <- exp(predictions$fit - 1.96 * predictions$se.fit)
+prediction_data$upper_ci <- exp(predictions$fit + 1.96 * predictions$se.fit)
+
+#  Line Plot for Age
+ggplot(prediction_data, aes(x = age, y = predicted_exercise, color = as.factor(healthy_diet), group = healthy_diet)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci, fill = as.factor(healthy_diet)), alpha = 0.2) +
+  labs(
+    x = "Age",
+    y = " Frequency",
+    color = "Healthy Diet",
+    fill = "Healthy Diet") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set2") +
+  scale_fill_brewer(palette = "Set2")
+```
+
+Figure \ref{fig:countpredplot} illustrates how predicted exercise frequency varies across the levels of a healthy diet, higher levels are associated with increased predicted exercise frequency. This suggests a positive relationship between diet quality and exercise frequency, indicating that individuals with healthier diets tend to have higher levels of physical activity. This aligns with health behaviour theories, which suggest that structured routines and positive habits, such as maintaining a healthy diet, can mitigate the impact of stress and support higher levels of physical activity, particularly during crises like the COVID-19 pandemic. The line plot provides further insights by showing how predicted exercise frequency changes with age, stratified by levels of healthy diet. Exercise frequency decreases or plateaus at certain ages for some diet levels while increasing for others. This highlights potential interactions between age and diet quality, suggesting that the relationship between diet and exercise frequency may vary across different age groups.
+
+## Conclusion
+This analysis investigated how psychological and behavioural factors influenced physical exercise frequency during the COVID-19 pandemic using a Quasi-Poisson regression model to account for underdispersion. Healthy diet emerged as the most significant predictor, with a healthier diet strongly associated with increased exercise frequency. Age exhibited a nonlinear relationship with exercise, highlighting a decline in activity levels with age, which stabilized or reversed in older populations. Loneliness and gender did not significantly influence exercise patterns, suggesting that individual coping strategies may moderate its effects. However, several limitations must be noted. The bounded range of the exercise variable (`r min(covid_df$physical_exercise, na.rm = TRUE)`- `r max(covid_df$physical_exercise, na.rm = TRUE)`) limits variability, potentially underestimating higher activity levels. The cross-sectional nature of the data prevents causal inferences about the relationship between diet, loneliness, and exercise. Potential response bias in self-reported exercise and diet data could distort associations. Nonetheless, these findings emphasize the importance of promoting healthy diets as a strategy to increase physical activity, especially during periods of isolation. Tailored interventions targeting younger populations to counteract declining exercise habits, alongside age-specific approaches for older adults, could enhance physical and mental health. Future research should explore longitudinal data and objective measures of behaviour to validate these findings and refine public health strategies, particularly by examining interactions between diet quality, loneliness, and age. These insights can inform policies to foster resilience and healthy behaviours during prolonged isolation.
