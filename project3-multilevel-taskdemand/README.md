@@ -14,9 +14,9 @@ This project uses linear mixed-effects modelling to examine how perceived task d
 - ICC (Intra-class correlation) to estimate group effects
 
 ## 📁 Files
-- `project3.Rmd` - full model code
+- `multilevel_model.Rmd` - full model code
 - `workplace_stress.csv` - data 
-- `multilevel_model.docx`
+- `multilevel_model.pdf`
 
 ## 📌 Outcome
 The multilevel model showed that job category explained 66% of the variance in task demand. Age interacted with job category, suggesting different perceptions of workload across roles.
