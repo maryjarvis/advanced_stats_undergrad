@@ -17,7 +17,15 @@ This project uses binary logistic regression to model the likelihood of depressi
 ## 📁 Files
 - `Project1.Rmd` – model code
 - `report.pdf` – summary of findings
-- `depression_data.csv` 
+- `depression_data.csv`
+
+## 📊 Data Source
+This dataset is based on anonymised survey data from published studies examining COVID-19 behavioural and psychological impacts.
+
+Seisembekov, T., Bolatov, A., Brimkulov, N., Jarylkasynova, G., Taalaikanova, A., Yuldashova, R., Kodirova, S., and Smailova, D. (2024). Mental health and well-being of healthcare workers in central asia. F1000Research, 13:872.
+
+The data is used here for educational and non-commercial purposes only.
 
 ## 📌 Outcome
 Identified significant predictors of depression and visualised interaction effects, aiding understanding of workforce mental health risks.
+
