@@ -14,9 +14,9 @@ This project uses ordinal logistic regression to model levels of insomnia severi
 - Model assumption diagnostics
 
 ## 📁 Files
-- `ordinal_model.Rmd` – model code
-- `insomnia_data.csv` – dataset 
-- `output_summary.pdf` – summary report
+- `project4.Rmd` – model code
+- `Copy_of_Dataset_Miranda_et_al.csv` – dataset 
+- `project4.pdf` – summary report
 
 ## 📌 Outcome
 The analysis confirmed that maternal age and employment status were significant predictors of insomnia severity, with higher risk linked to early pandemic stages and unemployment.
