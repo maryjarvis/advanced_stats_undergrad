@@ -1,0 +1,490 @@
+---
+bibliography: reference.bib
+biblio-style: apalike
+output:
+  pdf_document:
+    latex_engine: xelatex
+    citation_package: natbib
+header-includes:
+  \usepackage{booktabs}
+  \usepackage{graphicx}
+  \usepackage{float}
+  \usepackage{amsmath}
+---
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, # don't return messages
+                      warning = FALSE, # don't return warnings
+                      comment = NA, # don't comment output
+                      echo = FALSE, # display chunk (is default)
+                      eval = TRUE, # evaluate chunk (is default)
+                      out.width = '80%', # figure width, 
+                      fig.align = 'center',
+                      fig.width = 15,
+                      fig.height = 8)
+```
+```{r Packages}
+library(MASS)
+library(broom)
+library(broom.mixed)
+library(car)
+library(pscl)
+library(brant)
+library(stats)
+library(tinytex)
+library(MuMIn)
+library(lmerTest)
+library(caret)
+library(VGAM)
+library(nnet)
+library(splines)
+library(cowplot)
+library(stats)
+library(caret)
+library(ggridges)
+library(ggalluvial)
+library(kernlab)
+library(dplyr)
+library(influence.ME)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(gtsummary)
+library(janitor)
+library(kableExtra)
+library(knitr)
+library(lme4)
+library(lmtest)
+library(Matrix)
+library(ordinal)
+library(modelr)
+library(patchwork)
+library(pROC)
+library(sjPlot)
+library(table1)
+library(tidyverse)
+```
+# Research Question 4: Ordinal Regression
+```{r, loaddata4, results='hide', message=FALSE, include=FALSE, warning=FALSE}
+# Load and clean the dataset
+mother <- read.csv("~/Desktop/Copy_of_Dataset_Miranda_et_al.csv") %>% 
+  clean_names()
+
+# Select variables and remove any missing values
+mother_df <- mother <- dplyr::select(mother, work_status, days_of_pandemic, maternal_age, isi_total_score) %>% 
+  na.omit()
+
+# Convert isi_total_score to a factor with defined ranges
+mother_df$isi_total_score <- cut(mother_df$isi_total_score,
+                         breaks = c(-Inf, 7, 14, 21, 28),
+                         labels = c("No insomnia",
+                                    "Subthreshold insomnia",
+                                    "Moderate Severity",
+                                    "Severe"))
+
+# Create numeric value for descriptive statistics
+mother_df$isi_total_score_numeric <- as.numeric(mother_df$isi_total_score)
+
+# Convert days of pandemic to numeric
+mother_df$days_of_pandemic <- as.numeric(mother_df$days_of_pandemic)
+
+# Convert maternal age to a factor 
+mother_df$maternal_age <- factor(mother_df$maternal_age,
+                                   levels = c(0, 1),
+                                   labels = c("Younger Mother", "Older Mother"))
+
+# Convert work status to a factor 
+mother_df$work_status <- factor(mother_df$work_status,
+                                   levels = c(0, 1),
+                                   labels = c("Unemployed", "Employed"))
+
+```
+## Objective of Analysis
+This analysis aims to examine the relationship between maternal age, work status, and the progression of the pandemic on insomnia severity among mothers. Maternal age is a critical demographic factor, as older mothers may face increased care giving burdens and stress, potentially exacerbating sleep disturbances. Conversely, younger mothers might experience sleep difficulties due to the demands of new motherhood and economic pressures. Work status can influence sleep through structured routines or financial stress, respectively, with research showing significant impacts of unemployment on sleep quality during the pandemic \citep{gualano2020effects}. The progression of the pandemic introduces cumulative stressors, such as uncertainty, isolation, and disrupted routines, which are known to impair sleep over time \citep{cellini2020changes, altena2020dealing}. By analysing these predictors the study seeks to identify key factors influencing maternal insomnia severity and inform targeted interventions. 
+
+The data analysed, published in @miranda2021triggering, can be found in the CSV file *'Copy_of_Dataset_*
+*Miranda_et_al.csv'* inside the data sub-directory. The dataset comprises `r nrow(mother_df)` Argentinian postpartum women, collected through a cross-sectional survey conducted between May and July 2020. This study investigates factors influencing **insomnia severity** during the COVID-19 pandemic, measured using the Insomnia Severity Index (ISI). The ISI is a widely used tool for assessing sleep disturbances, providing a total score ranging from `r min(mother_df$isi_total_score_numeric, na.rm = TRUE)` to `r max(mother_df$isi_total_score_numeric, na.rm = TRUE)`. To facilitate the analysis, the ISI total score was recoded into an ordinal variable with four categories: No insomnia (ISI score < 8), Subthreshold insomnia (ISI score 8-14), Moderate Severity (ISI score 15-21), and Severe insomnia (ISI score > 21), aligning with established guidelines for interpreting ISI scores \citep{morin2011insomnia}. Within this sample, `r round(mean(mother_df$isi_total_score == "No insomnia", na.rm = TRUE) * 100, 2)`% of participants reported no significant insomnia (*n* = `r sum(mother_df$isi_total_score == "No insomnia", na.rm = TRUE)`), `r round(mean(mother_df$isi_total_score == "Subthreshold insomnia", na.rm = TRUE) * 100, 2)`%  reported subthreshold insomnia (*n* = `r sum(mother_df$isi_total_score == "Subthreshold insomnia", na.rm = TRUE)`), `r round(mean(mother_df$isi_total_score == "Moderate Severity", na.rm = TRUE) * 100, 2)`% reported moderate severity insomnia  (*n* = `r sum(mother_df$isi_total_score == "Moderate Severity", na.rm = TRUE)`), and `r round(mean(mother_df$isi_total_score == "Severe", na.rm = TRUE) * 100, 2)`% reported severe insomnia (*n* = `r sum(mother_df$isi_total_score == "Severe", na.rm = TRUE)`). The mean score of the sample was `r round(mean(mother_df$isi_total_score_numeric, na.rm = TRUE), 2)` (*SD* = `r round(sd(mother_df$isi_total_score_numeric, na.rm = TRUE), 2)`). **Maternal age**, a binary variable, was categorised into younger mothers (aged under 35 years) and older mothers (aged 35 years and older). The sample included: `r round(mean(mother_df$maternal_age == "Younger Mother", na.rm = TRUE) * 100, 2)`% younger mothers (*n* = `r sum(mother_df$maternal_age == "Younger Mother", na.rm = TRUE)`) and `r round(mean(mother_df$maternal_age == "Older Mother", na.rm = TRUE) * 100, 2)`% older mothers (*n* = `r sum(mother_df$maternal_age == "Older Mother", na.rm = TRUE)`). The variable **days of pandemic** was calculated as the number of days since March 11, 2020, when the World Health Organisation declared COVID-19 a pandemic, to the date the participant completed the survey. The mean was `r round(mean(mother_df$days_of_pandemic, na.rm = TRUE), 2)` days (*SD* = `r round(sd(mother_df$days_of_pandemic, na.rm = TRUE), 2)`), ranging from `r min(mother_df$days_of_pandemic, na.rm = TRUE)` to `r max(mother_df$days_of_pandemic, na.rm = TRUE)` days (median = `r round(median(mother_df$days_of_pandemic, na.rm = TRUE), 2)`). **Work Status** was categorised as employed or unemployed. The sample comprised: `r round(mean(mother_df$work_status == "Employed", na.rm = TRUE) * 100, 2)`% employed mothers (*n* = `r sum(mother_df$work_status == "Employed", na.rm = TRUE)`) and `r round(mean(mother_df$work_status == "Unemployed", na.rm = TRUE) * 100, 2)`% unemployed mothers (*n* = `r sum(mother_df$work_status == "Unemployed", na.rm = TRUE)`).
+```{r descriptives4, fig.cap= "Visualised Distributions of Variables.", fig.height = 9, fig.width= 20}
+# Plot 1
+violin_plot <- ggplot(mother_df, aes(x = isi_total_score, y = days_of_pandemic, fill = isi_total_score)) +
+  geom_violin(trim = FALSE, alpha = 0.7, color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.5, color = "black") +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(
+    title = "a",
+    x = "ISI Total Score", 
+    y = "Days of Pandemic"
+  ) +
+  theme(
+    text = element_text(size = 22), 
+    axis.title = element_text(size = 28), 
+    plot.title = element_text(size = 30, face = "bold"), 
+    legend.position = "none",
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+
+# Plot 2
+bar_chart <- ggplot(mother_df, aes(x = maternal_age, fill = isi_total_score)) +
+  geom_bar(position = "fill", alpha = 0.8, color = "black") +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(
+    title = "b",
+    x = "Maternal Age",
+    y = "Proportion",
+    fill = "ISI Total Score"
+  ) +
+  theme(
+    text = element_text(size = 22), 
+    axis.title = element_text(size = 28), 
+    plot.title = element_text(size = 30, face = "bold"), 
+    legend.position = "none",
+  )
+
+
+# Plot 3
+pandemic_plot <- ggplot(mother_df, aes(x = days_of_pandemic, y = isi_total_score, fill = isi_total_score)) +
+  geom_density_ridges(scale = 1, alpha = 0.7, color = "black") +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "plasma") +
+  labs(
+    title = "c",
+    x = "Days of Pandemic",
+    y = "ISI Total Score",
+    fill = "ISI Total Score"
+  ) +
+  theme(
+    text = element_text(size = 22), 
+    axis.title = element_text(size = 28), 
+    plot.title = element_text(size = 30, face = "bold"), 
+    legend.position = "none",
+  )
+
+# Plot 4
+work_status_plot <- ggplot(mother_df, aes(axis1 = work_status, axis2 = isi_total_score, fill = isi_total_score)) +
+  geom_alluvium(aes(weight = 1), width = 1/12, alpha = 0.8) +
+  geom_stratum(width = 1/12, fill = "lightgray", color = "black") +
+  geom_text(
+    stat = "stratum",
+    aes(label = ifelse(after_stat(stratum) == "Employed", "Employed", 
+                      ifelse(after_stat(stratum) == "Unemployed", "Unemployed", ""))),
+    size = 5,
+    color = "black",
+    angle = 90, 
+    hjust = 1   
+  ) +
+  scale_fill_viridis_d(option = "plasma") +
+  theme_minimal() +
+  labs(
+    title = "d",
+    x = NULL, 
+    y = "Count",
+    fill = "ISI Total Score" 
+  ) +
+  theme(
+    text = element_text(size = 22), 
+    axis.title = element_text(size = 28), 
+    plot.title = element_text(size = 30, face = "bold"), 
+    legend.position = "none",
+    panel.grid = element_blank(),
+    axis.text.x = element_blank(), 
+    axis.ticks.x = element_blank()
+  )
+
+# Combine plots
+violin_plot | bar_chart / 
+  pandemic_plot | work_status_plot +
+     theme(
+       legend.text = element_text(size = 14),
+       legend.title = element_text(size = 16)
+     ) +
+  plot_layout(guides = "collect") & theme(legend.position = "bottom")
+
+
+```
+Figure \ref{fig:descriptives4}:
+(a) Days of Pandemic by ISI Total Score, (b) Distribution of ISI Categories by Maternal Age, (c) Days of Pandemic by ISI Categories, (d) Sankey Diagram of Work Status and ISI Categories.
+
+## Statistical Model
+Ordinal logistic regression models, also known as proportional odds models, are a specialised type of generalized linear model used to analyse outcomes that are ordinal. These outcomes have a natural order but do not assume equal spacing between categories, such as levels of insomnia severity (*e.g., no clinically significant insomnia, subthreshold insomnia, clinical insomnia*). This model is particularly useful for analysing ranked data, where the goal is to assess the influence of multiple predictors on the likelihood of observing higher versus lower categories. The ordinal logistic regression model predicts the cumulative probability of an outcome being in or below a specific category. Mathematically, the model is expressed as:
+$$
+\text{logit}(P(Y \leq j)) = \alpha_j + \beta_1 X_1 + \beta_2 X_2 + \dots + \beta_k X_k
+$$
+
+where \( P(Y \leq j)\) is the cumulative probability of being in category \( j \) or below, \(Y\) is the ordinal outcome (insomnia severity), \(\alpha_j\) represents the intercept for category \( j \), and \( \beta_k \) are coefficients associated with the predictors \(X_k\) (e.g., days of pandemic,  maternal age, and work status). The logit function ensures the linearity of predictors in relation to the log-odds of the cumulative probabilities. The ordinal logistic model assumes proportional odds, meaning the relationship between predictors and log-odds remains constant across categories. This simplifies interpretation and ensures parsimony. If violated models like generalized ordered logistic regression may be more appropriate. Unlike multinomial regression, which treats categories as unordered, ordinal regression respects the ordered nature of the outcome while reducing parameters, enhancing interpretability and generalisability. It extends binary logistic regression by accommodating more than two ordered categories. It can be expressed in R using the MASS package as:
+
+
+```{r, echo = TRUE}
+ordinal_model <- polr(isi_total_score ~ maternal_age + days_of_pandemic + work_status, 
+                      data = mother_df, Hess = TRUE)
+```
+
+```{r ordinalvalidation, results='hide', message=FALSE, include=FALSE, warning=FALSE}
+# Model validation
+
+# Perform a Brant test
+brant_test <- brant(ordinal_model)
+
+# create linear model to test model assumptions
+assumptions_model <- lm(as.numeric(isi_total_score) ~ maternal_age + days_of_pandemic + work_status, data = mother_df)
+
+# VIF
+vif_values <- vif(assumptions_model)
+
+# Predicted probabilities from the model to calculate cooks distance
+fitted_probs <- fitted(assumptions_model) # Extract fitted probabilities
+residuals <- mother_df$isi_total_score - fitted_probs # Calculate residuals
+leverage <- hatvalues(assumptions_model) # Calculate leverage
+p <- length(coef(assumptions_model)) # Extract the number of predictors in the model
+cooks_distance <- (residuals^2) * leverage / p # Calculate Cook's Distance
+
+# Identify influential points
+influential_points <- which(cooks_distance > 4 / length(cooks_distance)) 
+
+
+# Residual plot
+pearson_resid <- residuals(assumptions_model, type = "pearson")
+plot(pearson_resid, main = "Pearson Residuals", ylab = "Residuals", xlab = "Index")
+
+```
+Model diagnostics show no concerns with multicollinearity (VIF < 5), influential points (Cook's Distance), or residuals, indicating a good fit. The Brant test confirmed that the proportional odds assumption holds, ensuring consistent relationships between predictors and insomnia severity categories, implying a generalized ordered logistic regression was not required.
+
+### Model Comparison
+```{r, echo=TRUE,  results='hide', message=FALSE, warning=FALSE}
+glm_linear <- lm(as.numeric(isi_total_score) ~ maternal_age + days_of_pandemic
+                 + work_status, data = mother_df)
+ordinal_model <- polr(isi_total_score ~ maternal_age + days_of_pandemic + work_status, 
+                   data = mother_df, Hess = TRUE)
+interaction_ordinal <- polr(isi_total_score ~ maternal_age + days_of_pandemic 
+                            + work_status + work_status * maternal_age, data = mother_df,
+                            Hess = TRUE)
+
+anova(ordinal_model, interaction_ordinal)
+```
+```{r ordinalmodelcomparison, include=FALSE, message=FALSE, warning=FALSE}
+# Model comparison table
+# Likelihood ratio test between the ordinal model and the interaction model
+lrt <- anova(ordinal_model, interaction_ordinal)
+
+# Extract degrees of freedom
+df_difference <- lrt$`Resid. df`[1] - lrt$`Resid. df`[2]
+
+# Pseudo r-squared for ordinal models
+pseudo_r2_ordinal <- pR2(ordinal_model)
+pseudo_r2_interaction <- pR2(interaction_ordinal)
+
+# Extracting metrics
+aic_values <- c(AIC(glm_linear), AIC(ordinal_model), AIC(interaction_ordinal))
+bic_values <- c(BIC(glm_linear), BIC(ordinal_model), BIC(interaction_ordinal))
+residual_deviance <- c(deviance(glm_linear), ordinal_model$deviance, interaction_ordinal$deviance)
+log_likelihoods <- c(logLik(glm_linear), logLik(ordinal_model), logLik(interaction_ordinal))
+
+#Chi squared statistics 
+lrt_stat_2 <- round(lrt[["LR stat."]][2], 2)
+lrt_p_value_2 <- round(lrt[["Pr(Chi)"]][2], 2)
+
+# Pseudo R-squared metrics
+mcfadden_r2 <- round(pseudo_r2_ordinal["McFadden"], 2)
+nagelkerke_r2 <- round(pseudo_r2_ordinal["r2CU"], 2)
+
+# Create the comparison table
+ordinal_comparison <- data.frame(
+  Model = c("Linear Model", 
+            "Ordinal Model", 
+            "Interaction Ordinal Model"),
+  AIC = round(aic_values, 2),
+  BIC = round(bic_values, 2),
+  Residual_Deviance = round(residual_deviance, 2),
+  Log_Likelihood = round(log_likelihoods, 2)
+)
+
+# Adding pseudo R-squared metrics to the table
+ordinal_comparison <- ordinal_comparison %>%
+  mutate(
+    McFadden_R2 = c(NA, mcfadden_r2, NA),
+    Nagelkerke_R2 = c(NA, nagelkerke_r2, NA)
+  )
+
+# Replace NA values in the table with "--"
+ordinal_comparison_clean <- ordinal_comparison %>%
+  mutate_all(~ ifelse(is.na(.), "--", .))
+
+# Replace underscores with spaces in column titles
+colnames(ordinal_comparison_clean) <- gsub("_", " ", colnames(ordinal_comparison_clean))
+
+# Perform drop1 analysis on the ordinal model
+drop_test_ordinal <- drop1(ordinal_model, test = "Chisq")
+
+```
+```{r ordtable}
+kable(ordinal_comparison_clean, caption = "Model Comparison Table \\label{tab:ordcomp}", align = "c")
+
+```
+
+The drop test and likelihood ratio tests affirm the critical role of predictors in explaining insomnia severity (Table \ref{tab:ordcomp}). The ordinal model significantly improves model fit compared to the linear model, with lower AIC (`r round(AIC(ordinal_model), 2)` vs. `r round(AIC(glm_linear), 2)`) and BIC (`r round(BIC(ordinal_model), 2)` vs. `r round(BIC(glm_linear), 2)`). Adding the interaction term further reduces the AIC (`r round(AIC(interaction_ordinal), 2)`) but slightly increases the BIC (`r round(BIC(interaction_ordinal), 2)`), indicating the improved fit does not offset the added complexity. Including days of pandemic and maternal age significantly improves model fit (\( \chi^2 \)(`r df_difference`) = `r lrt_stat_2`, \( p \) = `r lrt_p_value_2`), while work status, though less impactful alone, may have theoretical value when interacting with other variables \citep{kirwin2022working}. Pseudo-\( R^2 \) metrics, such as McFadden's (\( R^2 \) = `r round(mcfadden_r2, 2)`) and Nagelkerke's (\( R^2 \) = `r round(nagelkerke_r2, 2)`) indicates that the ordinal model explains a modest but meaningful proportion of variance in insomnia severity. These results underscore the importance of retaining key predictors and their interactions to capture nuanced relationships and enhance model explanatory power.
+
+## Model Evaluation and Interpretation
+```{r ordinalresults}
+# Define final model 
+ordinal_final_model <- polr(isi_total_score ~ maternal_age + days_of_pandemic + work_status
+              + work_status:maternal_age, data = mother_df, Hess = TRUE)
+
+# Extract coefficients
+ordinal_coefficients <- summary(ordinal_final_model)$coefficients
+
+# Calculate p-values
+p_values <- 2 * pt(-abs(ordinal_coefficients[, "t value"]), df = nrow(mother_df) - 1)
+
+# Define z-value for 95% confidence intervals
+z_value <- 1.96
+
+# Manually compute confidence intervals for all coefficients
+manual_conf_intervals <- data.frame(
+  Lower_CI = ordinal_coefficients[, "Value"] - z_value * ordinal_coefficients[, "Std. Error"],
+  Upper_CI = ordinal_coefficients[, "Value"] + z_value * ordinal_coefficients[, "Std. Error"]
+)
+
+# Calculate odd ratios 
+ordinal_odds_ratio <- exp(ordinal_coefficients[, "Value"])
+
+# Combine into a table
+ordinal_coefficients_table <- data.frame(
+  Effect = c(
+    "Older Mother (Maternal Age)",
+    "Days of Pandemic",
+    "Employed (Work Status)",
+    "Older Mother × Employed",
+    "No Insomnia → Subthreshold Insomnia",
+    "Subthreshold Insomnia → Moderate Severity",
+    "Moderate Severity → Severe"  ),
+  Estimate = round(ordinal_coefficients[, "Value"], 2),
+  Std_Error = round(ordinal_coefficients[, "Std. Error"], 2),
+  Odds_Ratio = round(ordinal_odds_ratio, 2),
+  p_value = round(p_values, 3),
+  Logit_CI = paste0(
+    "[",
+    round(manual_conf_intervals$Lower_CI, 2), ", ",
+    round(manual_conf_intervals$Upper_CI, 2), "]"
+  )
+) %>%
+  mutate(
+    formatted_p_value = case_when(
+      p_value < 0.001 ~ "< .001***",
+      p_value < 0.01 ~ paste0(p_value, "**"),
+      p_value < 0.05 ~ paste0(p_value, "*"),
+      TRUE ~ as.character(p_value)
+    )
+  )
+
+# Remove row names
+rownames(ordinal_coefficients_table) <- NULL
+
+# Create table
+knitr::kable(
+  ordinal_coefficients_table %>%
+    select(
+      Effect,
+      Estimate,
+      `Std. Error` = Std_Error,
+      `Odds Ratio` = Odds_Ratio,
+      `p-value` = formatted_p_value,
+      `95% CI` = Logit_CI
+    ),
+  caption = "Ordinal Logistic Regression Coefficients. \\label{tab:ordresults}",
+  align = c("l", "c", "c", "c", "c", "c"),
+  digits = 2,
+  format = "latex",
+  booktabs = TRUE
+) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    font_size = 8,
+    latex_options = c("hold_position")
+  ) %>%
+  column_spec(5, width = "2cm", latex_column_spec = "p{2cm}")
+
+```
+*Note.* Significance levels: \textasteriskcentered\textasteriskcentered\textasteriskcentered\ \(p < .001\), 
+\textasteriskcentered\textasteriskcentered\ \(p < .01\), 
+\textasteriskcentered\ \(p < .05\).
+
+The regression coefficients for the predictors in the model indicate their impact on the log odds of experiencing higher levels of insomnia severity (Table \ref{tab:ordresults}). Older mothers have an estimate of `r round(ordinal_coefficients_table$Estimate[1], 2)`, suggesting a `r round((1 - exp(ordinal_coefficients_table$Estimate[1])) * 100, 2)`% decrease in the likelihood of higher insomnia severity compared to younger mothers (`r round(exp(ordinal_coefficients_table$Estimate[1]) - 1, 2) * 100`%). However, this effect is not statistically significant, as evidenced by the \( p \)-value (`r round(ordinal_coefficients_table$p_value[1], 2)`) and the confidence interval (95% CI: [`r round(manual_conf_intervals$Lower_CI[1], 2)`; `r round(manual_conf_intervals$Upper_CI[1], 2)`]) which includes zero. This result suggests that maternal age may not independently influence insomnia severity in this context. Days of pandemic was a highly significant predictor, with an odds ratio of `r round(ordinal_coefficients_table$Odds_Ratio[2], 2)` (\( p \) = `r round(ordinal_coefficients_table$p_value[2], 3)`), indicating a `r round((exp(ordinal_coefficients_table$Estimate[2]) - 1) * 100, 3)`% increase in the odds of higher insomnia severity per additional day of the pandemic, highlighting the cumulative mental health burden as the pandemic progresses. Work status showed a significant reduction in the likelihood of higher insomnia severity, with employed mothers showing a `r round((1 - exp(ordinal_coefficients_table$Estimate[3])) * 100, 2)`% decrease in odds (`r round(ordinal_coefficients_table$Odds_Ratio[3], 2)`, \( p \) = `r round(ordinal_coefficients_table$p_value[3], 2)`, 95% CI: [`r round(manual_conf_intervals$Lower_CI[3], 2)`; `r round(manual_conf_intervals$Upper_CI[3], 2)`]), possibly due to financial stability or structured routines. The interaction between older mothers and employment suggested a possible increase in insomnia severity for older employed mothers (`r round(ordinal_coefficients_table$Odds_Ratio[4], 2)`, \( p \) = `r round(ordinal_coefficients_table$p_value[4], 2)`), but this effect was not statistically significant.
+
+Thresholds in the model define the cutoffs between categories of insomnia severity and are essential to the ordinal logistic regression model. For example, the threshold separating No Insomnia → Subthreshold Insomnia has an estimate of `r round(ordinal_coefficients_table$Estimate[5], 2)` (95% CI: [`r round(manual_conf_intervals$Lower_CI[5], 2)`; `r round(manual_conf_intervals$Upper_CI[5], 2)`]) indicating a significant and distinct separation between these levels. Similarly, the threshold for Subthreshold Insomnia → Moderate Severity is `r round(ordinal_coefficients_table$Estimate[6], 2)` (95% CI: [`r round(manual_conf_intervals$Lower_CI[6], 2)`; `r round(manual_conf_intervals$Upper_CI[6], 2)`]), and for Moderate Severity → Severe, the threshold is `r round(ordinal_coefficients_table$Estimate[7], 2)` (95% CI: [`r round(manual_conf_intervals$Lower_CI[7], 2)`; `r round(manual_conf_intervals$Upper_CI[7], 2)`]). These significant thresholds confirm the ordered nature of insomnia severity levels.
+
+```{r ordmodelfit}
+# Model fit statistics
+
+# Full model
+log_likelihood <- logLik(ordinal_final_model) # Log-likelihood for the full model
+deviance <- -2 * log_likelihood # Calculate deviance
+df_model <- length(coef(ordinal_final_model)) # Calculate number of parameters 
+df_residual <- nrow(mother_df) - df_model # Residual degrees of freedom 
+
+# Fit a null model with just the intercept
+null_model <- polr(isi_total_score ~ 1, data = mother_df, Hess = TRUE)
+log_likelihood_null <- logLik(null_model) # Log-likelihood for the null model
+null_deviance <- -2 * log_likelihood_null # Calculate null deviance
+df_null <- 1 # Calculate number of parameters
+```
+The null deviance of the model is `r round(null_deviance, 1)` on `r df_null` degree of freedom. The model deviance is `r round(deviance, 1)` on `r df_residual` degrees of freedom. The reduction in deviance from the null model to the final model shows how much better the model explains the data. A larger reduction in deviance with fewer parameters suggests a significant improvement in fit. Additionally, the small standard errors for significant predictors like days of pandemic and work status indicate precise and reliable estimates. Conversely, larger standard errors for non-significant predictors, such as maternal age, reflect greater uncertainty and wider confidence intervals. These patterns support the model's robustness and the precision of its effect estimates.
+
+### Predictions
+```{r, echo=TRUE, eval = FALSE, results='hide'}
+predict(ordinal_final_model, newdata = new_data, type = "probs")
+```
+```{r ordinalpredictions, out.height = "25%", fig.cap="Predicted Probability of ISI Categories."}
+# Create new data for predictions
+new_data <- expand.grid(
+  maternal_age = factor(c("Younger Mother", "Older Mother"), levels = c("Younger Mother", "Older Mother")),
+  days_of_pandemic = seq(min(mother_df$days_of_pandemic, na.rm = TRUE), max(mother_df$days_of_pandemic, na.rm = TRUE), length.out = 50),
+  work_status = factor(c("Employed", "Unemployed"), levels = c("Unemployed", "Employed"))
+)
+
+# Generate predicted probabilities
+predictions <- predict(ordinal_final_model, newdata = new_data, type = "probs")
+
+# Combine predictions with new_data
+prediction_probs <- cbind(new_data, as.data.frame(predictions))
+
+# Rename columns
+colnames(prediction_probs)[4:7] <- c("No insomnia", "Subthreshold insomnia", "Moderate severity", "Severe")
+
+# Reshape data for visualising
+predicted_probs_long <- prediction_probs %>%
+  pivot_longer(
+    cols = c("No insomnia", "Subthreshold insomnia", "Moderate severity", "Severe"), 
+    names_to = "ISI_Category",
+    values_to = "Probability"
+  )
+
+# Plot the predicted probabilities
+ggplot(predicted_probs_long, aes(x = days_of_pandemic, y = Probability, color = ISI_Category, linetype = maternal_age)) +
+  geom_line(size = 1) +
+  facet_wrap(~ work_status) + 
+  theme_minimal() +
+  scale_color_viridis_d(option = "plasma") +
+  labs(
+    x = "Days of Pandemic",
+    y = "Probability",
+    color = "Insomnia Level",
+    linetype = "Maternal Age"
+  ) +
+  theme(text = element_text(size = 22),
+        axis.title = element_text(size = 24),
+        axis.text = element_text(size = 22),
+        legened.title = element_text(size = 22),
+        strip.text = element_text(size = 26)
+  )
+
+```
+Figure \ref{fig:ordinalpredictions} illustrates the predicted probabilities of various Insomnia Severity Index categories over the course of the pandemic, segmented by maternal age (younger mother vs. older mother) and employment status (employed vs unemployed). It reveals distinct trends, such as the decreasing probability of no insomnia over time, particularly for unemployed individuals, while probabilities for more severe categories, such as moderate severity and severe, gradually increase. The differences between younger mothers generally exhibit higher probabilities for no insomnia and lower probabilities for severe categories compared to older mothers. Employment status also appears to influence these trends, with employed mothers generally showing more stable probabilities across the ISI categories. These patterns suggest that maternal age and employment status interact with stressors from the pandemic to shape insomnia severity. 
+
+
+
+## Conclusion
+This analysis highlights how maternal age, employment status, and pandemic duration influence insomnia severity among postpartum women. Prolonged pandemic stress  increased the likelihood of severe insomnia, while employment acted as a protective factor, with employed mothers showing lower risks. Younger mothers were more likely to report no insomnia, while older mothers showed slightly higher risks for severe categories, though this effect was minimal. Limitations include self-report biases and limited generalisability beyond the Argentinian context. These findings underscore the need for targeted mental health interventions, particularly for unemployed mothers, alongside policies that promote financial stability and childcare access to reduce insomnia severity during prolonged crises. Future research should explore longitudinal designs to better understand causal relationships expand samples to improve generalisability, and incorporate additional predictors, such as mental health measures to capture a more comprehensive picture of insomnia severity.
+
+# References
