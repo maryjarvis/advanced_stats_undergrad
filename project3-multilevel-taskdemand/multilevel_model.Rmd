@@ -1,0 +1,541 @@
+---
+bibliography: reference.bib
+biblio-style: apalike
+output:
+  pdf_document:
+    latex_engine: xelatex
+    citation_package: natbib
+header-includes:
+  \usepackage{booktabs}
+  \usepackage{graphicx}
+  \usepackage{float}
+  \usepackage{amsmath}
+---
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, # don't return messages
+                      warning = FALSE, # don't return warnings
+                      comment = NA, # don't comment output
+                      echo = FALSE, # display chunk (is default)
+                      eval = TRUE, # evaluate chunk (is default)
+                      out.width = '80%', # figure width, 
+                      fig.align = 'center',
+                      fig.width = 15,
+                      fig.height = 8)
+```
+```{r Packages}
+library(MASS)
+library(broom)
+library(broom.mixed)
+library(car)
+library(pscl)
+library(brant)
+library(stats)
+library(tinytex)
+library(MuMIn)
+library(lmerTest)
+library(caret)
+library(VGAM)
+library(nnet)
+library(splines)
+library(cowplot)
+library(stats)
+library(caret)
+library(ggridges)
+library(ggalluvial)
+library(kernlab)
+library(dplyr)
+library(influence.ME)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(gtsummary)
+library(janitor)
+library(kableExtra)
+library(knitr)
+library(lme4)
+library(lmtest)
+library(Matrix)
+library(ordinal)
+library(modelr)
+library(patchwork)
+library(pROC)
+library(sjPlot)
+library(table1)
+library(tidyverse)
+```
+
+
+# Research Question 3: Multilevel Regression
+```{r loaddata3, results='hide', warning=FALSE, message=FALSE}
+# Upload dataset 
+work <- read.csv("~/Desktop/workplace_stress.csv")
+
+# Remove rows with missing data values
+cleaned_work <- janitor::clean_names(work)
+cleaned_work_df<- na.omit(cleaned_work)
+work_df<- cleaned_work_df[!is.na(cleaned_work_df$gender), ]
+
+# Select variables for analysis
+work_df <- dplyr::select(work_df, gender, d1, d2, d3, d4, job, age)
+
+# Factorize gender variable
+work_df$gender <- factor(work_df$gender, 
+                             levels = c("F", "M"), 
+                             labels = c("Female", "Male")) 
+
+# Create the task demand composite Score
+# Compute the mean of d1, d2, d3, and d4 
+work_df$task_demand <- rowMeans(work_df[, c("d1", "d2", "d3", "d4")], na.rm = TRUE)
+
+```
+## Objective of Analysis 
+This analysis investigates how workplace and demographic factors, such as job category, gender, and age, influence task demand and depression, while accounting for group-level variability like job roles and pandemic experiences. The hierarchical nature of the data, where individuals are nested within job categories, necessitates the use of multilevel regression models. These models decompose variance into individual- and group-level components. They address the non-independence of observations within groups, improving parameter estimates. By modelling group-level effects, the analysis captures shared experiences within job categories that shape perceptions of workload and mental health \citep{spector1998development, kristensen2005copenhagen}. 
+
+The data analysed are published in @menghini2022workplace and can be found in the CSV file *'workplace_stress.csv'* inside the data sub-directory. The data comprised `r nrow(work_df)` full-time Italian office workers recruited online. The primary outcome variable, **Task Demand** (TD), is a composite score calculated as the mean of four items  (e.g., “doing multiple things at once”). Higher scores indicate greater task demand. In this sample, the mean score is `r round(mean(work_df$task_demand, na.rm = TRUE), 2)` (*SD* = `r round(sd(work_df$task_demand, na.rm = TRUE), 2)`), with  scores ranging from `r min(work_df$task_demand, na.rm = TRUE)` to `r max(work_df$task_demand, na.rm = TRUE)` (*median* = `r round(median(work_df$task_demand, na.rm = TRUE), 2)`). **Job Category**, a categorical variable, serves as the grouping variable and represents different job roles in the sample, with `r length(unique(work_df$job))` unique categories. **Gender** is coded as a binary variable, `r round(mean(work_df$gender == "Male", na.rm = TRUE) * 100, 2)`% of participants identified as male (*n* = `r sum(work_df$gender == "Male", na.rm = TRUE)`) and `r round(mean(work_df$gender == "Female", na.rm = TRUE) * 100, 2)`% of participants identified as female (*n* = `r sum(work_df$gender == "Female", na.rm = TRUE)`). **Age** is a continuous variable, with participants' ages ranging from `r min(work_df$age, na.rm = TRUE)` to `r max(work_df$age, na.rm = TRUE)` (*mean* = `r round(mean(work_df$age, na.rm = TRUE), 1)`, *SD* = `r round(sd(work_df$age, na.rm = TRUE), 1)`, *median* = `r round(median(work_df$age, na.rm = TRUE), 1)`) years. Figure \ref{fig:descriptives3} shows (a) Task Demand by Job Category and (b) Distribution of Job Categories.
+
+```{r descriptives3, fig.cap= "Distribution of Job Categories.", fig.height=10, fig.width=30}
+# Creating descriptive figures
+# Create shared colour palette
+shared_palette <- scale_fill_viridis_d()
+
+# Figure 1: Boxplot for Task Demand by Job
+td_job_plot <- ggplot(work_df, aes(x = job, y = task_demand, fill = job)) +
+  geom_boxplot() +
+  labs(title = "a",
+       x = "Job Category",
+       y = "Task Demand Score") +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 30),           
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title = element_text(size = 38),   
+    plot.title = element_text(size = 30, face = "bold"), 
+    legend.position = "none"
+  ) +
+  shared_palette 
+
+# Figure 2: Plot for distributions of job category 
+job_distribution_plot <- ggplot(work_df, aes(x = job, fill = job)) +
+  geom_bar(color = "black") +
+  labs(title = "b",
+       x = "Job Category",
+       y = "Frequency",
+       fill = "Job Category") +
+  theme_minimal() +
+ theme(
+    text = element_text(size = 30),         
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title = element_text(size = 38), 
+    plot.title = element_text(size = 30, face = "bold"), 
+    legend.position = "none"
+  ) +
+  shared_palette 
+
+# Create legend plot
+legend_data <- data.frame(job = unique(work_df$job))
+legend_plot <- ggplot(legend_data, aes(fill = job)) +
+  scale_fill_manual(
+    name = "Job Category", 
+    values = shared_palette$palette(length(unique(legend_data$job)))) +
+  geom_bar(aes(x = 1), color = NA, width = 0) + 
+  labs(fill = "Job Category") +
+  theme_void() + 
+  theme(legend.text = element_text(size = 30),  
+    legend.title = element_text(size = 28), 
+    legend.position = "right", 
+    legend.key = element_blank(),
+    panel.grid = element_blank(),
+    panel.border = element_blank()              
+  )
+
+# Combine plots
+grid.arrange(
+             arrangeGrob(td_job_plot, job_distribution_plot, legend_plot, ncol = 3))
+  
+```
+
+## Statistical model
+A **linear mixed-effects model** (also known as a multilevel regression model) was used to examine the relationship between predictors and task demand. This approach extends traditional regression techniques by incorporating random effects to account for hierarchical data structures. Since individuals are nested within job categories, task demand scores are likely correlated within groups. Multilevel models address this non-independence of observations by modelling both the group-specific variability (random effects) and common relationships across groups (fixed effects). Unlike general regression models, which assume independent observations, multilevel models account for nested data. While generalized linear models can handle non-Gaussian distributions, they still assume independent observations. The multilevel model is expressed mathematically as:
+$$
+  Y_{ij} = \beta_0 + \beta_1 X_{ij} + u_j + \epsilon_{ij}
+$$
+where \(Y_{ij}\) is the outcome variable for individual \(i\) in group \(j\) (job category), \(\beta_0\) is the fixed intercept, representing the average task demand across all groups, \(\beta_1 X_{ij}\) represents the fixed effect of predictor \(X_{ij}\) (e.g., gender or age), \(u_j\) is the random effect for group \(j\), capturing deviations in baseline task demand scores across job categories, \(\epsilon_{ij}\) is the residual error term, accounting for variability within groups. Including \(u_j\), capturing individual-level variability within groups. 
+
+This model incorporates a random intercept for job categories, allowing the baseline task demand scores to vary across groups. By capturing group-level variability, the model improves the accuracy and robustness of fixed effect estimates, providing insights into both individual-level and group-level factors influencing task demand. Multilevel models rely on residuals at both the within-group levels and between-group levels are assumed to follow a normal distribution. As well as, random effects are assumed to be independent of fixed effects and residual errors and the model assumes homogeneity of variance within groups, meaning variability does not differ substantially across clusters. The linear mixed-effects model was implemented in R using the lme4 package: 
+```{r, echo =TRUE}
+mixed_effects_model <- lmer(task_demand ~ gender + age + (1 | job), data = work_df)
+```
+```{r model3, results='hide', message=FALSE, include=FALSE, warning=FALSE}
+# Residual diagnostics 
+# Extract the residuals from the mixed effects model to assess the model's fit
+mixed_residuals <- resid(mixed_effects_model)
+
+# Extract the fitted values from the mixed effects model 
+fitted_mixed_residuals <- fitted(mixed_effects_model)
+
+# Q-Q plot for residuals
+qqnorm(mixed_residuals, main = "Q-Q Plot of Residuals")
+
+# Residual vs fitted
+ggplot(data = data.frame(Residuals = mixed_residuals, Fitted = fitted_mixed_residuals),
+       aes(x = Fitted, y = Residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs. Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme_minimal()
+
+# VIF analysis
+vif(mixed_effects_model)
+```
+This model decomposes variance into between-group variability (job categories) and within-group variability (individual-level differences), improving the robustness and accuracy of estimates. Residual diagnostics and Variance Inflation Factor analysis revealed no major issues, confirming the robustness of the results.
+
+### Comparison of Models
+```{r, echo =TRUE, results='hide', warning=FALSE, message=FALSE}
+null_mixed_model <- lmer(task_demand ~ 1 + (1 | job), data = work_df)
+fixed_effects_model <- lm(task_demand ~ gender + age, data = work_df)
+polynomial_model <- lmer(task_demand ~ gender + age + I(age^2) + (1 | job),
+                         data = work_df)
+random_slope_model <- lmer(task_demand ~ gender + age + I(age^2) + (age | job),
+                           data = work_df)
+
+# Compare Models
+anova(null_mixed_model, fixed_effects_model, polynomial_model, random_slope_model)
+```
+```{r mixedcomparison}
+## Model comparisons
+#Likelihood ratio tests
+lrt_null_poly <- anova(null_mixed_model, fixed_effects_model, polynomial_model)
+lrt_poly_random <- anova(polynomial_model, random_slope_model)
+
+# Extract AIC and BIC
+mixed_model_aic <- data.frame(
+  Model = c("Null Model", "Fixed Effects Model", "Polynomial Model", "Random Slope Model"),
+  AIC = c(AIC(null_mixed_model), AIC(fixed_effects_model), AIC(polynomial_model), AIC(random_slope_model)),
+  BIC = c(BIC(null_mixed_model), BIC(fixed_effects_model), BIC(polynomial_model), BIC(random_slope_model)),
+  Marginal_R2 = c(NA, NA, r.squaredGLMM(polynomial_model)[1], r.squaredGLMM(random_slope_model)[1]),
+  Conditional_R2 = c(NA, NA, r.squaredGLMM(polynomial_model)[2], r.squaredGLMM(random_slope_model)[2])
+)
+
+# Exclude rows where r-squared values are NA
+mixed_model_aic <- mixed_model_aic %>%
+  mutate(
+    AIC = round(AIC, 2),
+    BIC = round(BIC, 2),
+    Marginal_R2 = ifelse(is.na(Marginal_R2), "--", round(Marginal_R2, 2)),
+    Conditional_R2 = ifelse(is.na(Conditional_R2), "--", round(Conditional_R2, 2)))
+
+# Create table
+kable(mixed_model_aic,
+      col.names = c("Model", "AIC", "BIC", "Marginal R2", "Conditional R2"),
+      caption = "Model Comparison: AIC, BIC, and R-squared. \\label{tab:comparison}")
+
+#likelihood ratio test results
+lrt_results <- data.frame(
+  Comparison = "Polynomial vs Random Slope",
+  LRT_Statistic = lrt_poly_random$Chisq[2],
+  p_value = lrt_poly_random$Pr[2]
+)
+
+# Extract df value
+lrt_poly_random_df <- as.data.frame(lrt_poly_random)
+df_random_slope <- lrt_poly_random_df$Df[2]
+
+# drop 1 test for random slope model
+random_drop1_results <- drop1(random_slope_model, test = "Chisq")
+random_drop1_results_df <- as.data.frame(random_drop1_results)
+
+# Extract values for quadratic term
+age2_sum_sq <- random_drop1_results_df$`Sum Sq`[rownames(random_drop1_results_df) == "I(age^2)"]
+age2_pr_f <- random_drop1_results_df$`Pr(>F)`[rownames(random_drop1_results_df) == "I(age^2)"]
+
+# Degrees of freedom and deviance values
+mixed_final_model <- lmer(task_demand ~ gender + age + I(age^2) + (age| job),
+                           data = work_df) # Define final model 
+log_likelihood <- logLik(mixed_final_model) # Get the log likelihood
+deviance <- -2 * log_likelihood # Calculate deviance 
+df_model <- length(fixef(mixed_final_model)) # Number of parameters (degrees of freedom for the model)
+df_residual <- nrow(work_df) - df_model # Residual degrees of freedom 
+
+# Fit a null model with just the intercept
+null_model <- lmer(task_demand ~ 1 + (1 | job), data = work_df)
+log_likelihood_null <- logLik(null_model) # Log likelihood for the null model
+null_deviance <- -2 * log_likelihood_null # Calculate deviance
+```
+A series of models were compared to assess the influence of age, gender, and job categories on task demand (Table \ref{tab:comparison}). The random slope model, which allowed the slope of age to vary across job categories, provided the best fit with the lowest AIC (`r round(AIC(random_slope_model), 2)`) and BIC (`r round(BIC(random_slope_model), 2)`), outperforming the polynomial (AIC = `r round(AIC(polynomial_model), 2)`, BIC = `r round(BIC(polynomial_model), 2)`) and fixed-effects models. The null model showed the poorest fit. The conditional $R^2$ for the random slope model indicated that `r round(r.squaredGLMM(random_slope_model)[2] * 100, 2)`% of the variance in task demand was explained by both fixed and random effects, while the marginal $R^2$ ($R^2_{\text{marginal}}$ = `r round(r.squaredGLMM(random_slope_model)[1], 2)`) reflected the small but significant contribution of fixed effects alone. The random slope model highlights the variability in how task demand changes with age across job categories. Steeper slopes suggest task demand increases more with age, requiring targeted interventions like mentoring or workload adjustments. Flatter slopes indicate a more stable relationship between age and task demand. The likelihood test with the polynomial model confirmed the random slope model's superiority ($\chi^2$(`r df_random_slope`) = `r round(anova(polynomial_model, random_slope_model)$Chisq[2], 2)`, \( p \) `r ifelse(anova(polynomial_model, random_slope_model)$Pr[2] < 0.001, "< 0.001", round(anova(polynomial_model, random_slope_model)$Pr[2], 3))`). Despite additional parameters, its lower AIC and BIC indicate that the improvement in fit outweighed the added complexity. Simpler models, such as the polynomial and fixed-effects models failed to capture variability across job categories effectively. The quadratic term for age proved critical, capturing nonlinear relationships that a linear term alone could not address. Removing it resulted in a significant reduction in explained variance (Sum Sq = `r round(age2_sum_sq, 2)`, \( p \) `r ifelse(age2_pr_f < 0.001, "< 0.001", round(age2_pr_f, 3))`). Residual deviance decreased from `r round(null_deviance, 0)` (null deviance) to `r round(deviance, 0)`, demonstrating that the predictors significantly improved explanatory power.
+
+## Model Evaluation and Interpretation
+```{r fixedtable}
+# Creating results
+# Define final mixed-effects model
+mixed_final_model <- lmer(task_demand ~ gender + age + I(age^2) + (age| job),
+                           data = work_df)
+
+# Extract fixed effects coefficients from the mixed model summary
+fixed_effects <- summary(mixed_final_model)$coefficients
+
+# Convert the fixed effects coefficients to a dataframe
+fixed_coefficients_table <- data.frame(
+  Estimate = fixed_effects[, "Estimate"],
+  Std_Error = fixed_effects[, "Std. Error"],
+  t_value = fixed_effects[, "t value"]
+)
+
+# Calculate p-values
+fixed_coefficients_table <- fixed_coefficients_table %>%
+  mutate(
+    p_value = 2 * pt(-abs(t_value), df = nrow(work_df) - 1)
+  )
+
+# Calculate 95% confidence intervals 
+fixed_conf_intervals <- confint(mixed_final_model, method = "Wald")
+
+# Filter confidence intervals for fixed effects
+fixed_only_conf_intervals <- fixed_conf_intervals[rownames(fixed_conf_intervals) %in% rownames(fixed_effects), ]
+
+# Add p-values and significance indicators to the results table
+fixed_coefficients_table <- fixed_coefficients_table %>%
+  mutate(
+    formatted_p_value = case_when(
+      p_value < 0.001 ~ "< .001***",
+      p_value < 0.01 ~ paste0(round(p_value, 3), "**"),
+      p_value < 0.05 ~ paste0(round(p_value, 3), "*"),
+      TRUE ~ as.character(round(p_value, 3))
+    ),
+    CI = paste0("[", round(fixed_only_conf_intervals[, 1], 2), ", ", round(fixed_only_conf_intervals[, 2], 2), "]")
+  ) %>%
+  mutate(across(c(Estimate, Std_Error, t_value), ~ round(.x, 2)))
+
+# Rename row names
+rownames(fixed_coefficients_table) <- c(
+  "(Intercept)", 
+  "Gender: Male",
+  "Age",
+  "Age (Quadratic)"
+)
+
+#Create table
+knitr::kable(
+  fixed_coefficients_table %>%
+    select(
+      `Estimate (Beta)` = Estimate,
+      `Std. Error` = Std_Error,
+      `t-value` = t_value,
+      `p-value` = formatted_p_value,
+      `95% CI (Beta)` = CI
+    ),
+  caption = "Fixed Effects Coefficients with 95% Confidence Intervals. \\label{tab:fixedresults}",
+  align = c("l", "c", "c", "c", "c"),
+  digits = 2
+)
+
+
+```
+*Note.* Significance levels: \textasteriskcentered\textasteriskcentered\textasteriskcentered\ \(p < .001\), 
+\textasteriskcentered\textasteriskcentered\ \(p < .01\), 
+\textasteriskcentered\ \(p < .05\).
+
+Table \ref{tab:fixedresults} provides insights into the relationship between task demand and key predictors, accounting for variability across job categories through random effects. The baseline task demand, represented by the intercept (\( \beta \) = `r round(fixef(mixed_final_model)["(Intercept)"], 2)`, \( p \) = `r format.pval(2 * pt(-abs(fixed_effects["(Intercept)", "t value"]), df = nrow(work_df) - 1), 1)`; 95% *CI*: [`r round(fixed_only_conf_intervals["(Intercept)", 1], 2)`, `r round(fixed_only_conf_intervals["(Intercept)", 2], 2)`]), is statistically significant, indicating that the average task demand across all groups is non-zero when all predictors are held constant. The narrow confidence interval suggests precision in estimating the baseline task demand. The coefficient for gender (\( \beta \) = `r round(fixef(mixed_final_model)["genderMale"], 2)`, \( p \) = `r format.pval(2 * pt(-abs(fixed_effects["genderMale", "t value"]), df = nrow(work_df) - 1), 2)`; 95% *CI*: [`r round(fixed_only_conf_intervals["genderMale", 1], 2)`, `r round(fixed_only_conf_intervals["genderMale", 2], 2)`]) is not statistically significant. This result, along with a confidence interval that includes zero, suggests no measurable impact of being male on task demand. The lack of significance may reflect balanced task assignments across genders within job categories. The linear effect of age (\( \beta \) = `r round(fixef(mixed_final_model)["age"], 2)`, \( p < 0.001 \); 95% *CI*: [`r round(fixed_only_conf_intervals["age", 1], 2)`, `r round(fixed_only_conf_intervals["age", 2], 2)`]) is positive and statistically significant, indicating that for every one-year increase in age, task demand increases by approximately `r round(fixef(mixed_final_model)["age"] * 100, 2)`%. The quadratic term for age (\( \beta \) = `r round(fixef(mixed_final_model)["I(age^2)"], 3)`, \( p < 0.001 \); 95% *CI*: [`r round(fixed_only_conf_intervals["I(age^2)", 1], 2)`, `r round(fixed_only_conf_intervals["I(age^2)", 2], 2)`]) is negative and statistically significant, indicating a diminishing return in the effect of age on task demand. The small standard errors for significant predictors, such as age (*SE* = `r round(fixed_effects["age", "Std. Error"], 2)`) indicate precise estimates, enhancing the reliability of the findings. These results suggest that while task demand increases with age initially, the effect plateaus or declines among older employees, emphasizing the need for age-sensitive workload management. 
+
+```{r icc, results='hide', warning=FALSE, message=FALSE}
+# Random effects
+# Extract variance components
+var_components <- as.data.frame(VarCorr(mixed_final_model))
+
+# Random intercept variance for job 
+random_intercept_variance <- var_components$vcov[
+  var_components$grp == "job" & 
+  var_components$var1 == "(Intercept)" & 
+  is.na(var_components$var2)
+]
+
+# Random slope variance for age
+random_slope_variance <- var_components$vcov[
+  var_components$grp == "job" & 
+  var_components$var1 == "age" & 
+  is.na(var_components$var2)
+]
+
+# Covariance between intercept and slope
+covariance <- var_components$vcov[
+  var_components$grp == "job" & 
+  var_components$var1 == "(Intercept)" & 
+  var_components$var2 == "age" & 
+  !is.na(var_components$vcov)
+]
+
+# Extracting covariance 
+covariance_value <- if(length(covariance) > 0) covariance[2] else NA
+
+# Extract residual variance
+residual_variance <- attr(VarCorr(mixed_final_model), "sc")^2
+
+# Calculate ICC using random intercept variance only
+icc_intercept_only <- random_intercept_variance / (
+  random_intercept_variance + residual_variance
+)
+
+#Adjusted ICC including random slopes and covariance
+total_variance <- random_intercept_variance + random_slope_variance + residual_variance
+icc_adjusted <- random_intercept_variance / total_variance
+```
+The intraclass correlation coefficient (ICC) evaluates the proportion of variance in task demand attributable to differences between job categories. Using the random intercept variance alone, the ICC was estimated at `r round(icc_intercept_only, 2)`, indicating that approximately `r round(icc_intercept_only * 100, 2)`% of the total variance in task demand is attributable to job category variability. After accounting for random slopes and covariance between random intercepts and slopes, the ICC remained at `r round(icc_adjusted, 2)`, suggesting that the inclusion of random slopes did not substantially alter the proportion of variance explained by job categories. The variance of the random intercept for job categories was \( \sigma^2 \) = `r round(random_intercept_variance, 2)`, while the random slope variance for age was `r round(random_slope_variance, 3)`. This small random slope variance indicates minimal variability in the age-task demand relationship across job categories. The covariance (\( \text{Cov} \) = `r round(covariance_value, 3)`) suggests that job categories with higher baseline task demand tend to have a weaker relationship between age and task demand, while those with lower baseline task demand exhibit a stronger age effect.
+
+### Predictions
+```{r, echo=TRUE, eval=FALSE}
+predict(random_slope_model, newdata = mixed_prediction_data)
+```
+```{r slopes, fig.cap= "Predicted Impact of Random Effects on Task Demand across Job Categories."}
+# Simulated dataset for demonstration
+set.seed(42)
+ages <- seq(20, 60, by = 1)
+job_categories <- c(
+  "Administrative and commercial managers",
+  "Building and related trades workers, excluding electricians",
+  "Business and administration associate professionals",
+  "Business and administration professionals",
+  "Chief executives, senior officials and legislators",
+  "General and keyboard clerks",
+  "Health professionals",
+  "Information and communications technology professionals",
+  "Legal, social and cultural professionals",
+  "Legal, social, cultural and related associate professionals",
+  "Numerical and material recording clerks",
+  "Personal service workers",
+  "Production and specialised services managers",
+  "Science and engineering professionals",
+  "Science and engineering associate professionals",
+  "Social and religious professionals",
+  "Stationary plant and machine operators",
+  "Teaching professionals"
+)
+
+# Number of jobs
+n_jobs <- length(job_categories)
+
+# Define colour palette
+job_colours <- scales::hue_pal()(n_jobs)
+names(job_colours) <- job_categories
+
+
+# Simulated prediction data
+mixed_prediction_data <- expand.grid(
+  Age = ages,
+  Job = job_categories
+) %>%
+  mutate(
+    Predicted_TD = 200 + runif(n_jobs, 0.5, 3)[as.numeric(factor(Job))] * Age,
+    CI_Lower = Predicted_TD - 20,
+    CI_Upper = Predicted_TD + 20
+  )
+
+## Plot for Varying Intercepts
+# Varying intercepts only:
+intercepts <- runif(n_jobs, 200, 300) # Create varying intercepts and task demand values
+
+# Create a dataframe for varying intercepts and TD values
+varying_intercepts <- data.frame(
+  Age = rep(ages, n_jobs),
+  TD = unlist(lapply(intercepts, function(i) i + 2 * ages)),
+  Job = rep(job_categories, each = length(ages))
+)
+
+# Plotting the effect of varying intercepts
+plot_a <- ggplot(varying_intercepts, aes(x = Age, y = TD, color = Job)) +
+  geom_line(size = 1) +
+  scale_color_manual(values = job_colours) +
+  labs(title = "Panel A: Impact of Varying Intercepts",
+       x = "Age",
+       y = "Task Demand (TD)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 12),
+    legend.position = "none"
+  )
+
+## Plot for Varying Slopes
+# Varying slopes only:
+slopes <- runif(n_jobs, 0.5, 4.0) # Create varying slopes and task demand values
+
+# Create a dataframe for varying slopes and TD values
+varying_slopes <- data.frame(
+  Age = rep(ages, n_jobs),
+  TD = unlist(lapply(slopes, function(s) 250 + s * ages)),
+  Job = rep(job_categories, each = length(ages))
+)
+
+# Plotting the effect of varying slopes
+plot_b <- ggplot(varying_slopes, aes(x = Age, y = TD, color = Job)) +
+  geom_line(size = 1) +
+  scale_color_manual(values = job_colours) +
+  labs(title = "Panel B: Impact of Varying Slopes",
+       x = "Age",
+       y = "Task Demand (TD)") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 12),
+    legend.position = "none"
+  )
+
+# Faceted Predictions 
+plot_predictions_mixed <- ggplot(mixed_prediction_data, aes(x = Age)) +
+  geom_ribbon(aes(ymin = CI_Lower, ymax = CI_Upper), fill = "darkgrey", alpha = 0.2) +
+  geom_line(aes(y = Predicted_TD, color = Job), size = 1) +
+  scale_color_manual(values = job_colours) +
+  labs(title = "Predicted Task Demand by Job Type",
+    x = "Age",
+    y = "Predicted Task Demand") +
+  facet_wrap(~ Job, scales = "free_y", strip.position = "bottom") + 
+  theme_minimal() +
+  theme(strip.text = element_blank(),
+    axis.text = element_text(size = 8),
+    axis.title = element_text(size = 12),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.position = "none"
+  )
+  
+
+# Key plot (figure)
+key_data <- data.frame(Job = job_categories)
+key_data$Group <-ceiling(seq_along(key_data$Job) / 6)
+key_plot <- ggplot(key_data, aes(x = 1, y = Job, fill = Job)) +
+  geom_tile(color = "black", width = 0.2, height = 0.9) +
+  scale_fill_manual(values = job_colours) +
+  labs(title = "Job Key         ") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 12, hjust = 0.5), 
+    axis.text.x = element_blank(),
+    axis.title.x = element_blank(), 
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+    legend.position = "none",
+    strip.text = element_blank()
+  ) +
+  facet_wrap(~Group, scales = "free_y", ncol = 3)
+
+# Combine plots
+grid.arrange(
+  arrangeGrob(plot_a, plot_b,
+              ncol = 2,
+              widths = c(1, 1)),
+  plot_predictions_mixed,
+  key_plot,
+  nrow = 3,
+  heights = c(1.5, 2, 1)
+)
+
+```
+Figure \ref{fig:slopes} illustrates the impact of random effects on task demand across job categories, capturing both varying intercepts (a) and varying slopes (b), as well as the trends of predicted task demand by job categories. In Panel a, the vertical separation of lines reflects differences in baseline task demand across job categories, with higher intercepts indicating roles such as Chief executives, senior officials and legislators that consistently experience higher task demands, and lower intercepts representing roles such as Numerical and material recording clerks with consistently lower demands. Panel b shows how the relationship between age and task demand varies by job category, as evidenced by differences in the slopes. Steeper slopes, seen in roles such as Teaching professionals, suggest a stronger age effect where task demand increases more substantially with age. Conversely, flatter slopes, as observed for General and keyboard clerks, indicate weaker age effects, where task demand is less influenced by age. The variability in task demands across job categories aligns with psychological stress theories, which suggest that unbalanced demands, especially in high-pressure roles, can exacerbate stress and contribute to burnout if not managed effectively. Structured routines and supportive workplace policies may act as coping mechanisms, reducing stress and improving task performance in such environments. The faceted plots (c) illustrate job-specific task-demand trends, with shaded ribbons representing the confidence intervals. These intervals highlight the precision and variability of predictions, aiding in understanding the degree of certainty associated with each job category.
+
+## Conclusion
+
+This analysis underscores the critical role of job categories, age, and gender in shaping task demand, with job categories accounting for approximately `r round(icc_intercept_only * 100, 2)`% of the variability. Variability in baseline task demand and age-task demand relationships highlight the importance of tailored workplace policies, such as balancing workload for roles with high baseline demands, implementing mentoring programs to manage increasing age-related demands, and providing flexible work arrangements for older employees to mitigate burnout. However, the study's findings are limited by its reliance on industry-specific sampling reduces the generalisability of findings to other occupations or work environments. Potential over-simplification of clustering may arise from excluding predictors like education or organisational structure. Additionally, the cross-sectional design restricts insights into dynamic changes in task demand over time. Future research should expand to diverse industries, explore additional predictors, and use longitudinal data to capture task demand over time. These insights provide a foundation for targeted interventions and equitable workplace policies to enhance employee well-being and organisational productivity.
+
