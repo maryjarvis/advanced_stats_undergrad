@@ -15,7 +15,7 @@ This project uses binary logistic regression to model the likelihood of depressi
 - AIC-based model comparison
 
 ## 📁 Files
-- `logistic_model.Rmd` – main model code
+- `Project1.Rmd` – model code
 - `report.pdf` – summary of findings
 - `depression_data.csv` 
 
