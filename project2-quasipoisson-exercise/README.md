@@ -23,7 +23,7 @@ This project applies quasi-Poisson regression to explore how diet, loneliness, g
 This dataset is based on anonymised survey data from published studies.
 
 Pinedo, R., Vicario-Molina, I., González Ortega, E., and Palacios Picos, A. (2021). Factors related to mental
-health during the covid-19 lockdown in spain. Frontiers in psychology, 12:715792.
+health during the covid-19 lockdown in spain. Frontiers in psychology, 12:715792. https://doi.org/10.3389/fpsyg.2021.715792
 
 The data is used here for educational and non-commercial purposes only.
 
