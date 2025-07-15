@@ -1,0 +1,445 @@
+---
+bibliography: reference.bib
+biblio-style: apalike
+output:
+  pdf_document:
+    latex_engine: xelatex
+    citation_package: natbib
+header-includes:
+  \usepackage{booktabs}
+  \usepackage{graphicx}
+  \usepackage{float}
+  \usepackage{amsmath}
+---
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, # don't return messages
+                      warning = FALSE, # don't return warnings
+                      comment = NA, # don't comment output
+                      echo = FALSE, # display chunk (is default)
+                      eval = TRUE, # evaluate chunk (is default)
+                      out.width = '80%', # figure width, 
+                      fig.align = 'center',
+                      fig.width = 15,
+                      fig.height = 8)
+```
+```{r Packages}
+library(MASS)
+library(broom)
+library(broom.mixed)
+library(car)
+library(pscl)
+library(brant)
+library(stats)
+library(tinytex)
+library(MuMIn)
+library(lmerTest)
+library(caret)
+library(VGAM)
+library(nnet)
+library(splines)
+library(cowplot)
+library(stats)
+library(caret)
+library(ggridges)
+library(ggalluvial)
+library(kernlab)
+library(dplyr)
+library(influence.ME)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(gtsummary)
+library(janitor)
+library(kableExtra)
+library(knitr)
+library(lme4)
+library(lmtest)
+library(Matrix)
+library(ordinal)
+library(modelr)
+library(patchwork)
+library(pROC)
+library(sjPlot)
+library(table1)
+library(tidyverse)
+```
+
+# Research Question 1: Binary Logistic Regression 
+```{r loaddata}
+# Load dataset and clean variable names
+depression_df <- read.csv("Data/depression_data.csv") %>% clean_names()
+
+# Select analysis variables
+depression_df <- dplyr::select(depression_df, age, job, family_status, depression)
+
+
+# Covert variables into factors with labels
+#1. family status
+depression_df$family_status <- factor(depression_df$family_status,
+                                      levels = c(1, 2, 3, 4),
+                                      labels = c("Single", "Married", "Divorced", "Widowhood"))
+
+#2. job type
+depression_df$job <- factor(depression_df$job,
+                                      levels = c(1, 2),
+                                      labels = c("Nurse", "Physician"))
+
+#3. depression
+depression_df$depression <- factor(depression_df$depression,
+                                   levels = c(0, 1),
+                                   labels = c("Absent", "Present"))
+```
+## Objective of analysis
+This study examines the impact of family status, job type, and age on depression among healthcare workers during the COVID-19 pandemic, using a binary logistic regression model. Additionally, potential interactions are explored to determine whether the effect of job type depends on the level of family status. Family status reflects the influence of social support on mental health, while job type highlights differences in stress and responsibilities between nurses and physicians \citep{morgantini2020factors}. By including the interaction term, the study aims to determine whether the protective or risk factors associated with family status differ for nurses and physicians, providing insights for more tailored mental health interventions for healthcare workers.
+
+The data, derived from \cite{seisembekov2024mental}, was collected through a cross-sectional study between July and November 2022 in Spain. The dataset is available in the file 'depression_data.csv' and includes `r nrow(depression_df)` observations. Participants ranged in age from `r min(depression_df$age, na.rm = TRUE)` to `r max(depression_df$age, na.rm = TRUE)` years (*Median* = `r median(depression_df$age, na.rm = TRUE)`; *Mean* =  `r round(mean(depression_df$age, na.rm = TRUE), 1)`; *SD* = `r round(sd(depression_df$age, na.rm = TRUE), 1)`). **Age** was treated as a continuous variable due to its quantitative nature. **Family status** was treated as a categorical variable with four groups: **Single** (`r round((sum(depression_df$family_status == "Single", na.rm = TRUE) / nrow(depression_df)) * 100, 1)`%; *n* = `r sum(depression_df$family_status == "Single", na.rm = TRUE)`), **Married** (`r round((sum(depression_df$family_status == "Married", na.rm = TRUE) / nrow(depression_df)) * 100, 1)`%; *n* = `r sum(depression_df$family_status == "Married", na.rm = TRUE)`), **Divorced** (`r round((sum(depression_df$family_status == "Divorced", na.rm = TRUE) / nrow(depression_df)) * 100, 1)`%; *n* = `r sum(depression_df$family_status == "Divorced", na.rm = TRUE)`), or **Widowhood** (`r round((sum(depression_df$family_status == "Widowhood", na.rm = TRUE) / nrow(depression_df)) * 100, 1)`%; *n* = `r sum(depression_df$family_status == "Widowhood", na.rm = TRUE)`). The categorical treatment allows for capturing group differences and their interaction with job type.  **Job type** was also treated as a categorical variable, with participants categorized as **Nurses** (`r round((sum(depression_df$job == "Nurse", na.rm = TRUE) / nrow(depression_df)) * 100, 1)`%; *n* = `r sum(depression_df$job == "Nurse", na.rm = TRUE)`), or **Physicians** (`r round((sum(depression_df$job == "Physician", na.rm = TRUE) / nrow(depression_df)) * 100, 1)`%; *n* = `r sum(depression_df$job == "Physician", na.rm = TRUE)`). The dichotomous nature of this variable reflects the distinct workplace roles and stressors associated with each job type (Figure \ref{fig:descriptives}). **Depression**, the binary outcome variable, was coded as 0 (Absent) and 1 (Present), with `r round(mean(depression_df$depression == "Present", na.rm = TRUE) * 100, 1)`% (*n* = `r sum(depression_df$depression == "Present", na.rm = TRUE)`) participants reported depression and `r round(mean(depression_df$depression == "Absent", na.rm = TRUE) * 100, 1)`% (*n* = `r sum(depression_df$depression == "Absent", na.rm = TRUE)`) not reporting it. The mean prevalence of depression in the sample was `r round(mean(depression_df$depression == "Present", na.rm = TRUE), 2)` (*SD* = `r round(sd(depression_df$depression == "Present", na.rm = TRUE), 2)`). 
+
+```{r descriptives, fig.cap = "(a) The Age Distribution of Participants, (b) Proportions of Family Status, (c) Age by Depression Status, (d) Proportions by Job Type."}
+# Visualisations of the predictors 
+# Define a consistent colour palette
+color_palette <- c("Absent" = "red", "Present" = "purple")
+
+
+#1. Plotting the Age Distribution of Participants
+plot_age_distribution <- ggplot(depression_df, aes(x = age)) + 
+  geom_histogram(binwidth = 5, fill = "purple", color = "black") + 
+  labs(title = "a", x = "Age", y = "Frequency") + 
+  theme_minimal() +
+  theme(text = element_text(size = 18),
+        axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(face = "bold")
+  )
+
+#2. plot for proportions of depression by family status
+# Summarising depression data by family status
+rating_depression <- depression_df %>%
+  group_by(family_status, depression) %>%
+  summarise(count = n()) %>%
+  mutate(proportion = count / sum(count))
+
+# Creating the plot for proportions of depression by family status
+plot_family_status <- ggplot(rating_depression, aes(x = family_status, y = proportion, fill = depression)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = color_palette) + 
+  labs(title = "b", x = "Family Status", y = "Proportion", fill = "Depression Status") +
+  scale_x_discrete(labels = c("Single", "Married", "Divorced", "Widowhood")) + 
+  theme_minimal() +
+  theme(text = element_text(size = 18),
+        axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        legend.position = "none",  
+        plot.title = element_text(face = "bold")
+  )
+
+#3. Boxplot for Age by Depression Status
+plot_age_by_depression <- ggplot(depression_df, aes(x = depression, y = age)) + 
+  geom_boxplot(aes(fill = depression), show.legend = FALSE) +
+  scale_fill_manual(values = color_palette) + 
+  labs(title = "c", x = "Depression Status", y = "Age") +
+  theme_minimal() +
+  theme(text = element_text(size = 18),
+        axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        plot.title = element_text(face = "bold"),
+        legend.position = "none"  
+  )
+
+#4.plot for proportions of depression by job type
+# Summarising depression data by job type
+job_type_depression <- depression_df %>%
+  group_by(job, depression) %>%
+  summarise(count = n()) %>%
+  mutate(proportion = count / sum(count))
+
+# Creating the plot for proportions of depression by job type
+plot_job_type <- ggplot(job_type_depression, aes(x = job, y = proportion, fill = depression)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = color_palette) + 
+  labs(title = "d", x = "Job Type", y = "Proportion", fill = "Depression Status") +
+  theme_minimal() +
+  theme(text = element_text(size = 18),
+        axis.text = element_text(size = 16),
+        axis.title = element_text(size = 16),
+        legend.position = "none",  
+        plot.title = element_text(face = "bold")
+  )
+
+
+# Combine the plots
+plot_age_distribution + plot_family_status + 
+               plot_age_by_depression + plot_job_type + 
+  plot_layout(ncol = 2, nrow = 2, guides = "collect") +  
+  plot_annotation(
+    theme = theme(plot.title = element_text(size = 18, face = "bold"))) &
+  theme(legend.position = "bottom") 
+
+```
+
+## Statistical model 
+Binary logistic regression is a Generalized Linear Model used to model binary outcomes, making it ideal for predicting depression (*absent vs. present*). It estimates the probability of depression as a function of predictor variables while ensuring the predicted probabilities remain within the valid range of 0 to 1. This is achieved through the logit link function, which transforms probabilities into log-odds to linearize the relationship between  predictors and the outcome. The formula for the logistic regression model is as follows: 
+$$
+y_i \sim \text{Bernoulli}(\theta_i), \quad \text{logit}(\theta_i) = \beta_0 + \sum_{k=1}^{K} \beta_k x_{ki}, \quad \text{for} \, i = 1, \ldots, n.
+$$
+where \( y_i \) is the binary outcome for individual \( i \), \( \theta_i \) represents the probability of depression \( i \), \( \text{logit}(\theta_i) = \ln\left(\frac{\theta_i}{1 - \theta_i}\right) \) is the log-odds of depression for individual \( i \), \( \beta_0 \) is the intercept, representing the log-odds of depression when all predictors are at their reference values, and \( \beta_k x_{ki} \) represents the effect of predictor \( k \) (e.g., age, job type, family status) on the log-odds of depression. For instance, a positive \( \beta_k \) increases the log-odds, while a negative \( \beta_k \) decreases it. 
+
+Logistic regression generalizes linear regression by allowing non-normal response variables and incorporating appropriate link functions. Unlike general linear models, which assume normally distributed outcomes, logistic regression uses the Bernoulli distribution for binary outcomes, ensuring accurate probability estimation through odds ratios. In contrast, multilevel logistic regression accounts for hierarchical structures with random effects but is unnecessary due to independent observations and non-clustered data. Odds ratios, derived by exponentiating coefficients, quantify the effect of predictors on depression likelihood, by measuring the relative change in the odds of depression associated with each predictor. For example, if job type has a positive coefficient, it implies an increase in the odds of depression for a specific job type compared to the reference category. The logistic regression model is implemented in R using glm():
+
+```{r, echo =TRUE}
+bm_model <- glm(depression ~ age + job * family_status, data = depression_df, 
+                family = binomial)
+```
+```{r binaryassumptions, echo= FALSE, results= 'hide', message=FALSE, warning=FALSE, fig.show='hide'}
+# Linearity assumption check for logistic regression
+# Predicted probabilities for the model's fitted values
+depression_df$predicted <- predict(bm_model, type = "response")
+
+# Plot the residuals age to visually assess the linearity assumption
+ggplot(data = depression_df, aes(x = age, y = residuals(bm_model, type = "deviance"))) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", color = "blue") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Residuals vs Age: Linearity Check",
+    x = "Age",
+    y = "Deviance Residuals"
+  ) +
+  theme_minimal() 
+
+# Fit a model with a quadratic term
+bm_model_quadratic <- glm(depression ~ age + I(age^2) + job * family_status, data = depression_df, family = binomial)
+
+# Variance Inflation Factor (VIF) for multicollinearity
+vif_values <- vif(bm_model_quadratic)
+
+# Calculate deviance residuals for model diagnostics
+residuals_deviance <- residuals(bm_model_quadratic, type = "deviance")
+
+# Calculate fitted values from the model
+fitted_values <- fitted(bm_model_quadratic)
+
+# Dispersion test for overdispersion
+dispersion <- sum(residuals(bm_model_quadratic, type = "pearson")^2) / bm_model_quadratic$df.residual
+
+# Normal Q-Q Plot for deviance residuals
+qqnorm(residuals_deviance, main = "Q-Q Plot of Deviance Residuals")
+
+```
+The linearity assumption was assessed visually. Non-linearity for age was observed, justifying the inclusion of a quadratic term (\(\text{Age}^2\)), aligning with prior research \citep{clark1996job}. Variance Inflation Factor analysis confirmed no significant multicollinearity among predictors.
+
+### Model Comparison 
+```{r, echo = TRUE, eval=FALSE}
+bm_null_model <- glm(depression ~ 1, data = depression_df, family = binomial)
+bm_model_linear <- glm(depression ~ age + job * family_status, 
+                       data = depression_df, family = binomial)
+anova(bm_model_linear, bm_model_quadratic, test = "Chisq")
+```
+```{r drop1, warning=FALSE}
+# Model validation
+
+bm_null_model <- glm(depression ~ 1, data = depression_df, family = binomial) # null model with no predictors
+bm_model_linear <- glm(depression ~ age + job * family_status, data = depression_df, family = binomial) # Linear model
+
+#McFadden's R-squared calculation:
+llh_full <- logLik(bm_model_quadratic) # log likelihood of full model
+llh_null <- logLik(bm_null_model) # log likelihood of full model
+r2_mcfadden <- 1 - (as.numeric(llh_full) / as.numeric(llh_null)) # Mcfadden's R-squared
+r2_mcfadden_percent <- r2_mcfadden * 100 #convert to percentage
+
+# Perform likelihood ratio test between linear and quadratic models:
+anova_results <- anova(bm_model_linear, bm_model_quadratic, test = "Chisq")
+
+# Extract the Chi-Square statistic from the anova results
+chi_square_value <- anova_results$Deviance[2]
+
+# Perform the drop1() test to evaluate the impact of each predictor on the model's fit
+drop1_results <- drop1(bm_model_quadratic, test = "Chisq")
+
+# Convert drop1 results into a clean dataframe
+# Perform the drop1() test to evaluate the impact of each predictor
+drop1_results <- drop1(bm_model_quadratic, test = "Chisq")
+
+# Convert results into a clean dataframe
+drop1_df <- as.data.frame(drop1_results) %>%
+  tibble::rownames_to_column("Term") %>%  
+  mutate(
+    Term = case_when(
+      Term == "<none>" ~ "Full Model",
+      Term == "family_status" ~ "Family Status",
+      Term == "job" ~ "Job Type",
+      Term == "age" ~ "Age (Linear Term)",
+      Term == "I(age^2)" ~ "Age (Quadratic Term)",
+      Term == "job:family_status" ~ "Job: Family Status",
+      TRUE ~ Term  
+    ),
+    Deviance = round(Deviance, 2),  
+    AIC = round(AIC, 2),          
+    LRT = ifelse(Term == "Full Model", "---", round(LRT, 2)),
+    `Pr(>Chi)` = ifelse(Term == "Full Model", "---", 
+                        ifelse(`Pr(>Chi)` < 0.001, "<0.001", round(`Pr(>Chi)`, 2)))
+  ) %>%
+  dplyr::select(Term, Deviance, AIC, LRT, `Pr(>Chi)`)
+
+# Generate table
+kable(
+  drop1_df,
+  col.names = c("Term", "Deviance", "AIC", "LRT", "P-Value"),
+  format = "latex",
+  booktabs = TRUE,
+  caption = "Model Comparison Results. \\label{tab:drop}"
+) %>%
+  kable_styling(latex_options = c("hold_position"), position = "center")
+
+# Extract AIC and p-values for age (quadratic) term from the drop1 results
+quadratic_aic <- drop1_df$AIC[drop1_df$Term == "Age (Quadratic Term)"]
+quadratic_p_value <- drop1_df$`Pr(>Chi)`[drop1_df$Term == "Age (Quadratic Term)"]
+
+# Extract the df from the anova results for referencing 
+bm_df <- as.data.frame(anova_results)
+df_bm <- bm_df$Df[2]
+```
+Table \ref{tab:drop} presents the model comparison results revealing a minimal improvement in fit with the quadratic term (*AIC* = `r quadratic_aic`, \( p \) = `r quadratic_p_value`), indicating a limited impact on depression outcomes. Similarly, adding interaction terms between job type and family status led to slight increases in deviance and AIC. Although the interaction term did not significantly affect the model, it helps capture subtle relationships between job roles and family support, aligning with prior research on their relevance to mental health \citep{morgantini2020factors, seisembekov2024mental}. The model's overall explanatory power, as indicated by McFadden \( R^2 \) = `r round(r2_mcfadden, 2)` (`r round(r2_mcfadden_percent, 2)`%), reflects a modest improvement over the null model. Although the predictors did not significantly reduce deviance ($\chi^2$(`r df_bm`) = `r round(chi_square_value, 2)`, \( p > 0.05 \)), they contribute to understanding potential factors influencing depression and justify further investigation.
+
+
+## Model Evaluation and Interpretation
+```{r bmcoef}
+# Summarise the fitted logistic regression model
+results <- summary(bm_model_quadratic)
+
+# Calculate odds ratios and 95% confidence intervals
+odds_ratios <- exp(coef(bm_model_quadratic)) 
+conf_int <- exp(confint(bm_model_quadratic, method = "profile")) 
+
+# Extract estimates and standard errors of the coefficients from the model summary results
+bm_estimates <- results$coefficients[, "Estimate"]
+bm_std_errors <- results$coefficients[, "Std. Error"]
+
+# Combine results into a data frame
+logistic_results <- data.frame(
+  Predictor = c(
+    "Intercept",
+    "Age",
+    "Age (Quadratic)",
+    "Job: Physician",
+    "Family Status: Married",
+    "Family Status: Divorced",
+    "Family Status: Widowhood",
+    "Physician X Married",
+    "Physician X Divorced",
+    "Physician X Widowhood"
+  ), 
+  Estimate = bm_estimates, 
+  Odds_Ratio = odds_ratios,
+  Std_Error = bm_std_errors,
+  Z_Value = results$coefficients[, "z value"],
+  P_Value = round(results$coefficients[, "Pr(>|z|)"], 3),
+  CI_Lower = round(conf_int[, 1], 2),
+  CI_Upper = round(conf_int[, 2], 2)
+) %>%
+  mutate(
+    `95% CI` = paste0("[", CI_Lower, ", ", CI_Upper, "]"),
+    formatted_p_value = case_when(
+      P_Value < 0.001 ~ "< .001***",
+      P_Value < 0.01 ~ paste0(P_Value, "**"),
+      P_Value < 0.05 ~ paste0(P_Value, "*"),
+      TRUE ~ as.character(P_Value)
+    )
+  )
+
+# Remove row names 
+rownames(logistic_results) <- NULL
+
+
+# Create a table 
+knitr::kable(
+  logistic_results %>%
+    select(
+      Predictor,
+      `Estimate (Beta)` = Estimate,
+      `Odds Ratio` = Odds_Ratio,
+      `Std. Error` = Std_Error,
+      `Z-Value` = Z_Value,
+      `P-Value` = formatted_p_value,
+      `95% CI`
+    ),
+  caption = "Logistic Regression Results. \\label{tab:interactionresults}",
+  align = c("l", "c", "c", "c", "c", "c", "c"),
+  digits = 2,
+  format = "latex",
+  booktabs = TRUE
+) %>%
+  kable_styling(
+    full_width = FALSE,
+    position = "center",
+    font_size = 8,
+    latex_options = c("hold_position")
+  ) %>%
+  column_spec(5, width = "2cm", latex_column_spec = "p{2cm}")
+```
+*Note.* Significance levels: \textasteriskcentered\textasteriskcentered\textasteriskcentered\ \(p < .001\), 
+\textasteriskcentered\textasteriskcentered\ \(p < .01\), 
+\textasteriskcentered\ \(p < .05\).
+
+Table \ref{tab:interactionresults} presents the logistic regression results. The intercept (\( \text{OR} \) = `r round(exp(coef(bm_model_quadratic)["(Intercept)"]), 2)`) represents the baseline likelihood of depression, but since an age of 0 is not realistic, it serves as a reference point. The intercept is not statistically significant (\( p \) = `r format.pval(coef(summary(bm_model_quadratic))["(Intercept)", "Pr(>|z|)"], digits = 2)`), indicating no meaningful difference in depression odds at the baseline level of predictors. **Job type** emerged as the most significant factor, with physicians having significantly higher odds of  depression compared to nurses. The estimate for job type (physician) is `r round(coef(bm_model_quadratic)["jobPhysician"], 2)` with an odds ratio of `r round(exp(coef(bm_model_quadratic)["jobPhysician"]), 2)` (\( p \) < 0.001), indicating a `r round((exp(coef(bm_model_quadratic)["jobPhysician"]) - 1) * 100, 2)`% increase in the odds of depression for physicians. **Family status** also influenced depression risk. Married individuals exhibited reduced odds of depression compared to singles. The estimate for married individuals is `r round(coef(bm_model_quadratic)["family_statusMarried"], 2)`, with an odds ratio of `r round(exp(coef(bm_model_quadratic)["family_statusMarried"]), 2)`, indicating a `r round((exp(coef(bm_model_quadratic)["family_statusMarried"]) - 1) * 100, 2)`% reduction in the odds of depression for married individuals (\( p \) = `r format.pval(coef(summary(bm_model_quadratic))["family_statusMarried", "Pr(>|z|)"], digits = 1)`). Overall, this suggests that marriage provides a protective effect against depression. However, widowhood showed that while the odds of depression were nearly doubled (\( \text{OR} = `r round(exp(coef(bm_model_quadratic)["family_statusWidowhood"]), 2)` \)), the confidence interval includes 1, aligning with a non-significant \( p \)-value (\( p \) = `r format.pval(coef(summary(bm_model_quadratic))["family_statusWidowhood", "Pr(>|z|)"], digits = 1)`). This suggests no conclusive evidence for an effect. Divorced individuals did not exhibit a statistically significant difference (\( p \) = `r format.pval(coef(summary(bm_model_quadratic))["family_statusDivorced", "Pr(>|z|)"], digits = 1)`). Additionally, **Age** showed no significant linear effect on depression. The estimate for age is `r round(coef(bm_model_quadratic)["age"], 2)`, and the odds ratio is `r round(exp(coef(bm_model_quadratic)["age"]), 2)`, which suggests that for each year increase in age, the odds of depression decrease by about `r round((1 - exp(coef(bm_model_quadratic)["age"])) * 100, 2)`%. However, this result is not statistically significant (\( p \) = `r format.pval(coef(summary(bm_model_quadratic))["age", "Pr(>|z|)"], digits = 2)`). Similarly, the quadratic term for age (\( \text{OR} = `r round(exp(coef(bm_model_quadratic)["I(age^2)"]), 2)` \)) did not significantly improve model fit (\( p \) = `r format.pval(coef(summary(bm_model_quadratic))["I(age^2)", "Pr(>|z|)"], digits = 2)`).
+
+The **interaction** between job type and family status revealed that Married physicians significantly exhibited lower odds of depression compared to single nurses. The estimate for this interaction term is `r round(coef(bm_model_quadratic)["jobPhysician:family_statusMarried"], 2)`, and the odds ratio is `r round(exp(coef(bm_model_quadratic)["jobPhysician:family_statusMarried"]), 2)`, suggesting that married physicians have `r round((exp(coef(bm_model_quadratic)["jobPhysician:family_statusMarried"]) - 1) * 100, 2)`% lower odds of depression compared to single nurses. However, the confidence interval includes 1 (95\% CI: [`r round(exp(coef(bm_model_quadratic)["jobPhysician:family_statusMarried"] - 1.96 * summary(bm_model_quadratic)$coefficients["jobPhysician:family_statusMarried", "Std. Error"]), 2)`, `r round(exp(coef(bm_model_quadratic)["jobPhysician:family_statusMarried"] + 1.96 * summary(bm_model_quadratic)$coefficients["jobPhysician:family_statusMarried", "Std. Error"]), 2)`]), indicating no significant interaction effect (\( p \) = `r format.pval(summary(bm_model_quadratic)$coefficients["jobPhysician:family_statusMarried", "Pr(>|z|)"], digits = 2)`). For the interaction effect with widowhood, the odds ratio is `r round(exp(coef(bm_model_quadratic)["jobPhysician:family_statusWidowhood"]), 2)`, and the confidence interval for this interaction is quite wide, indicating limited precision. The interaction is not statistically significant (\( p \) = `r format.pval(summary(bm_model_quadratic)$coefficients["jobPhysician:family_statusWidowhood", "Pr(>|z|)"], digits = 2)`). Finally, for divorced physicians, there is a significant increase in the odds of depression compared to single nurses (\( \text{OR} \) = `r round(exp(coef(bm_model_quadratic)["jobPhysician:family_statusDivorced"]), 2)`, \( p \) = `r format.pval(summary(bm_model_quadratic)$coefficients["jobPhysician:family_statusDivorced", "Pr(>|z|)"], digits = 1)`), indicating that being a physician and being divorced increases the likelihood of depression compared to being a single nurse.
+
+The standard errors for significant predictors, such as physician (*SE* = `r round(bm_std_errors["jobPhysician"], 2)`) and married (*SE* = `r round(bm_std_errors["family_statusMarried"], 2)`), were relatively small, reflecting precise estimates. However, for many predictors like the interaction between physician and widowhood (*SE* = `r round(bm_std_errors["jobPhysician:family_statusWidowhood"], 2)`), the larger standard error may contribute to its lack of significance, indicating greater uncertainty in its effect. The model's explanatory power is evidenced by a substantial reduction in deviance from `r round(bm_null_model$null.deviance, 1)` (null deviance) on `r bm_null_model$df.null` degrees of freedom to `r round(bm_model_quadratic$deviance, 1)` (residual deviance) on `r bm_model_quadratic$df.residual` degrees of freedom. This reduction indicates that the included predictors substantially improve the model’s fit, demonstrating their collective relevance in explaining depression risk among healthcare workers.
+
+### Model Predictions 
+```{r predbmci}
+# Create a new data frame for predictions
+# Create a sequence of ages
+age_seq <- seq(min(depression_df$age, na.rm = TRUE), max(depression_df$age, na.rm = TRUE), by = 1)
+
+# Expand grid to include all combinations of predictors
+prediction_data <- expand.grid(
+  age = age_seq,
+  job = c("Nurse", "Physician"),                    # Replace with your actual job categories
+  family_status = c("Single", "Married", "Divorced", "Widowhood")
+)
+
+# Add the quadratic term for age
+prediction_data$age2 <- prediction_data$age^2
+
+# Predict probabilities with standard errors
+predictions <- predict(bm_model_quadratic, newdata = prediction_data, type = "response", se.fit = TRUE)
+
+# Add predictions and confidence intervals
+prediction_data <- prediction_data %>%
+  mutate(
+    predicted_prob = predictions$fit,
+    lower_ci = pmax(0, predictions$fit - 1.96 * predictions$se.fit),  # Ensure within [0,1]
+    upper_ci = pmin(1, predictions$fit + 1.96 * predictions$se.fit)
+  )
+
+```
+```{r, echo = TRUE, eval = FALSE}
+predict(bm_model_quadratic, newdata = prediction_data, type = "response")
+```
+```{r predbm, fig.align='center', fig.cap='Predicted Probability of Depression by Job, Age, and Family Status.', echo=FALSE, out.height='22%'}
+# Plot predicted probabilities with confidence intervals 
+ggplot(prediction_data, aes(x = age, y = predicted_prob, color = job, fill = job)) +
+  geom_line(size = 1) +                                           
+  geom_ribbon(aes(ymin = lower_ci, ymax = upper_ci), alpha = 0.2, color = NA) + 
+  facet_wrap(~ family_status, nrow = 2) +                         
+  labs(
+    x = "Age (Years)",                                           
+    y = "Predicted Probability of Depression",                    
+    color = "Job Category",                                       
+    fill = "Job Category"                                         
+  ) +
+  theme_minimal(base_size = 24) +                                 
+  theme(text = element_text(size = 20, face = "bold"),
+    strip.text = element_text(size = 26, face = "bold"),          
+    legend.position = "bottom"                                    
+  )
+
+```
+
+Figure \ref{fig:predbm} illustrates that physicians consistently show higher depression probabilities than nurses, likely due to the increased workplace stress, highlighting the need for targeted mental health support for physicians. The non-linear relationship between age and depression is evident, with younger workers likely affected by early-career stress and older workers facing burnout or health-related challenges. Additionally, married individuals display lower probabilities of depression, suggesting protective effects of social support. In contrast, widowed individuals have higher predicted probabilities, warranting tailored emotional and social support programs for this group. Confidence intervals highlight the precision of predictions, with narrower intervals for married individuals and wider intervals for widowed individuals, reflecting greater uncertainty for some subgroups.
+
+
+## Conclusion
+This analysis identifies job type as a key predictor of depression, with physicians at higher risk than nurses, suggesting the need for tailored mental health interventions. Marital status appears protective, highlighting the importance of social support systems in mitigating depression. However, several limitations must be noted. The cross-sectional design limits causal inference, as relationships observed cannot determine temporal effects. Unmeasured confounders, such as workplace overload variability or individual resilience, may influence depression risk. Additionally, the homogeneity of the sample, limited to healthcare workers in Spain, reduces generalisability to other occupations or cultural contexts. The findings provide actionable insights for developing targeted policies, including stress management programs tailored to physicians, mentorship initiatives for early career workers, resilience training for healthcare staff, and strengthening social support networks within healthcare organisations. These strategies could address disparities in mental health risk and improve overall workplace well-being. Future studies should evaluate the effectiveness of targeted intervention and refine strategies through subgroup analyses to better address the diverse needs of healthcare workers.
+
