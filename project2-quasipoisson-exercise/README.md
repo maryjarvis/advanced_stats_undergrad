@@ -18,5 +18,8 @@ This project applies quasi-Poisson regression to explore how diet, loneliness, g
 - `loneliness_original.csv` – dataset
 - `project2_count_regression.pdf` – visualised results
 
+Pinedo, R., Vicario-Molina, I., González Ortega, E., and Palacios Picos, A. (2021). Factors related to mental
+health during the covid-19 lockdown in spain. Frontiers in psychology, 12:715792.
+
 ## 📌 Outcome
 The model revealed that loneliness and diet both influence physical activity, and their interaction highlights how health behaviours shift under stress conditions like lockdowns.
