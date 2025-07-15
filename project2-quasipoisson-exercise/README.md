@@ -14,9 +14,9 @@ This project applies quasi-Poisson regression to explore how diet, loneliness, g
 - Visualisation of model predictions
 
 ## 📁 Files
-- `quasipoisson_model.Rmd` – model code and interpretation
-- `exercise_data.csv` – clean dataset
-- `summary.pdf` – visualised results
+- `project2.Rmd` – model code
+- `loneliness_original.csv` – dataset
+- `project2_count_regression.pdf` – visualised results
 
 ## 📌 Outcome
 The model revealed that loneliness and diet both influence physical activity, and their interaction highlights how health behaviours shift under stress conditions like lockdowns.
